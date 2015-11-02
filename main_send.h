@@ -21,7 +21,7 @@ enum alloc {NONALLOC = 0, ALLOC = 1};							//deffirinciate the condition of a f
 #define BUFLEN 2048
 #define NUM 2
 #define FPS 3
-
+#define LAYERS 4
 
 #define IP1 "127.0.0.1"
 #define IP2 "127.0.0.1"
@@ -34,10 +34,13 @@ void *rtp_send(void * arg);
 void *recv_rtcp(void *arg);
 void *send_rtcp(void *arg);
 int openfile(char *filemane);
+FILE open_tracefile (char *filename);
+int open_bitrate_file();
 int readpacket(struct rtppacket *packet,int fd);
 int UDP_Init(int x, char * ip, int localport, char * ipout);
 void SetnonBlocking(int s);
-int readtrace(struct trace *frame, char *filemane);
+int readtrace(char *filename);
+void create_packet(struct rtppacket *packet, uint i, uint j);
 
 vector <path_t> path_select (const vector <path_t>& lastpath);
 vector <path_t> path_scheduling (const vector <path_t>& lastpath);
@@ -80,15 +83,21 @@ public:
 struct trace
 {
 public:
-	trace(): time (0), number (0),  location(NONALLOC), size(12,0),PSNRY(12,0), PSNRU(12,0), PSNRV(12,0){}
+	trace(): time (0), number (0),  location(NONALLOC), size(LAYERS, std::vector<int> (FPS)),PSNRY(LAYERS, std::vector<double> (FPS)),
+	PSNRU(LAYERS, std::vector<double> (FPS)), PSNRV(LAYERS, std::vector<double> (FPS)){}
 	double time;
 	int number;
 	char type[10];
     alloc location;
-	std::vector <int> size;
-	std::vector <double> PSNRY;
-	std::vector <double> PSNRU;
-	std::vector <double> PSNRV;
+    std::vector <std::vector<int> > size;
+    std::vector <std::vector<double> > PSNRY;
+    std::vector <std::vector<double> > PSNRU;
+    std::vector <std::vector<double> > PSNRV;
+
+//	std::vector <int> size;
+//	std::vector <double> PSNRY;
+//	std::vector <double> PSNRU;
+//	std::vector <double> PSNRV;
 };
 
 
