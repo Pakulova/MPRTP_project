@@ -40,7 +40,7 @@ int readpacket(struct rtppacket *packet,int fd);
 int UDP_Init(int x, char * ip, int localport, char * ipout);
 void SetnonBlocking(int s);
 int readtrace(char *filename);
-void create_packet(struct rtppacket *packet, uint i, uint j);
+int create_packet();
 
 vector <path_t> path_select (const vector <path_t>& lastpath);
 vector <path_t> path_scheduling (const vector <path_t>& lastpath);
@@ -68,12 +68,13 @@ void signalHandler(int sig);
 struct rtppacket
 {
 public:
-	rtppacket():dump_ts(0), payloadlen(0),packetlen(0),ts(0), seq(0), erase(0), path(NUM, INIT){}
+	rtppacket():dump_ts(0), payloadlen(0),packetlen(0),ts(0), seq(0), seq_fr(0), erase(0), path(NUM, INIT){}
 	uint32_t dump_ts;	/*timestamp of RTP dump. It is similar to timestamp of packet generation from the application*/
 	int payloadlen;
 	int packetlen;
 	int ts;				/*timestamp in RTP file*/
-	uint16_t seq;
+	uint16_t seq;		/* Sequance number in video sequence*/
+	int seq_fr;	/* Sequance number in a frame*/
 	char buf[1600];
 	int erase;
 	std::vector <path_t> path;       //Declare a vector of path_type elements
@@ -93,11 +94,6 @@ public:
     std::vector <std::vector<double> > PSNRY;
     std::vector <std::vector<double> > PSNRU;
     std::vector <std::vector<double> > PSNRV;
-
-//	std::vector <int> size;
-//	std::vector <double> PSNRY;
-//	std::vector <double> PSNRU;
-//	std::vector <double> PSNRV;
 };
 
 
