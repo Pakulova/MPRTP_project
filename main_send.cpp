@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <numeric>
 #include <utility>
+#include <iterator>
 
 #include<signal.h>
 
@@ -43,6 +44,7 @@ using std::vector;
 #define MTU 1492				//define MTU size of a network
 #define FPS 3					//reflects the quantity of Frame Per Sec layers of a video
 #define LAYERS 4				//reflects the quantity of layers in a video sequence including base layer
+#define MPRTP_HEADER 12			//Size of MPRTP header
 
 //#define Media_Rate 500000.0
 #define RTCP_BW 0.05*2097152/8 /*2Mbps video*/
@@ -60,7 +62,6 @@ pthread_mutex_t frame_mutex;
 pthread_mutex_t media_mutex;
 pthread_t threadrtp[2], threadrtcpr[2], threadrtcps[2];
 
-
 vector<struct status *> path_status;
 vector<struct mprtphead *> mrheader;
 
@@ -70,11 +71,11 @@ std::vector<std::pair<double, int> > AvB(NUM, std::make_pair(0.0, 0)); //Create 
 
 std::vector<enum path_t> thread_path(NUM, INIT);
 std::vector<enum path_t> lastpath(NUM, INIT);
-std::vector<int64_t> tp(NUM,0);
-std::vector<std::vector<double> > Media_bitrate(LAYERS, std::vector<double> (FPS,0));
-std::pair <int, int> Media_index(0,0);
+std::vector<int64_t> tp(NUM, 0);
+std::vector<std::vector<double> > Media_bitrate(LAYERS, std::vector<double>(FPS, 0));
+std::pair<int, int> Media_index(LAYERS, FPS);
 
-list<struct trace *> frame_list; 			//Create a list of frames (with different layers information) based of trace file
+list<struct trace *> frame_list; //Create a list of frames (with different layers information) based of trace file
 list<struct rtppacket *> packets_to_send;   //Create list of packets!!!!
 struct rtcpsrbuf rtcpsr;
 //struct rtcprrbuf rtcprr;
@@ -87,8 +88,9 @@ FILE *SB_log = NULL;
 FILE *path_par = NULL;
 FILE *log_rtp = NULL;
 FILE *log_all = NULL;
+FILE *log_quantity = NULL;
 
-uint16_t seq = 0;
+uint64_t seq = 0;
 int64_t ts0 = -1;
 int64_t st0 = -1;
 int64_t fb_interval = 0;
@@ -132,7 +134,6 @@ int main(int argc, char* argv[])
 	sigAction.sa_flags = 0;
 	assert(0 == sigaction(SIGINT, &sigAction, NULL));
 
-
 	for (int i = 0; i < n; i++)
 	{
 		printf("ipout = %s \n", ipout[i]);
@@ -143,9 +144,6 @@ int main(int argc, char* argv[])
 		mrheader.push_back(new struct mprtphead);
 		memset(mrheader.back(), 0, sizeof(struct mprtphead));
 		MPRTP_Init_subflow(mrheader.at(i), i);
-
-		/*rtcp_rr_packets.at(i).push_back(new struct rtcprrbuf);
-		 memset(rtcp_rr_packets.at(i).back(), 0, sizeof(struct rtcprrbuf));*/
 	}
 
 	SB_log = fopen("/home/ekaterina/experiment/SB_file", "w");
@@ -158,15 +156,21 @@ int main(int argc, char* argv[])
 	log_rtp = fopen("/home/ekaterina/experiment/log_rtp_file", "w");
 	if (log_rtp == NULL)
 		printf("Impossible to open or create txt log file for RTP!!! \n");
-
 	else
-		fprintf(log_rtp, "%4s %6s %10s %10s %16s \n", "Path", "Length", "Seq", "ts", "send_time");
+		fprintf(log_rtp, "%4s %6s %10s %10s %10s %16s \n", "Path", "Length", "Seq_No", "Frame_No"
+				"ts", "send_time");
+
+	log_quantity = fopen("/home/ekaterina/experiment/log_qu", "w");
+	if (log_quantity == NULL)
+		fprintf(log_all,"Impossible to open or create txt quantity!!!\n");
+	else
+		fprintf(log_quantity, "%s %8s %10s %10s \n", "Frame", "packets", "Real time", "timestamp");
 
 	log_rtcp_r = fopen("/home/ekaterina/experiment/log_rtcp_r", "w");
 	if (log_rtcp_r == NULL)
 		printf("Impossible to open or create txt rtcp_r!!!\n");
 	else
-		fprintf(log_rtcp_r,	"path     ts 		ehsn 	fraclost	totallost	jitter		LSR : LSR_FRAC		DLSR:DLSR_FRAC	      Packet_sent\n");
+		fprintf(log_rtcp_r, "path     ts 		ehsn 	fraclost	totallost	jitter		LSR : LSR_FRAC		DLSR:DLSR_FRAC	      Packet_sent\n");
 
 	//Create 3 threads for each interface: 1) for RTP; 2) RTCP send; 3)RTCP receive
 	create_threads(n, ip, port, ipout);
@@ -182,7 +186,6 @@ int main(int argc, char* argv[])
 //	 FILE fd = open_tracefile(filename);
 
 #endif
-
 
 	path_par = fopen("/home/ekaterina/experiment/path_parameters", "w");
 	if (path_par == NULL)
@@ -209,11 +212,7 @@ int main(int argc, char* argv[])
 		return -1; // Exception!!!!
 	}
 	else
-		fprintf(log_path, "path 	   seq		ts \n");
-
-	//Read the packets from RTP File
-
-	//	open_bitrate_file();
+		fprintf(log_path, "%s %5s %5s %5s \n", "path", "seq_No", "frame_No", "ts");
 
 #if TRACING
 
@@ -254,29 +253,28 @@ int main(int argc, char* argv[])
 			fprintf(log_all, "st0 = %" PRId64 " \n", st0);
 
 			if (pthread_mutex_lock(&list_mutex) != 0)
-				throw std::runtime_error("Mutex lock failed");
+			throw std::runtime_error("Mutex lock failed");
 
 			if (!packets_to_send.empty() && packets_to_send.back()->ts != packet->ts)
 			{
 				if (pthread_mutex_unlock(&list_mutex) != 0)
-					throw std::runtime_error("Mutex unlock failed");
+				throw std::runtime_error("Mutex unlock failed");
 
 				insert_data_to_list(packet);
 				break;
 			}
 
 			if (pthread_mutex_unlock(&list_mutex) != 0)
-				throw std::runtime_error("Mutex unlock failed");
+			throw std::runtime_error("Mutex unlock failed");
 
 			insert_data_to_list(packet);
 		}
-
 
 		/*number of clocks to wait before sending packet
 		 * Check the packets in the list. We should wait only in case when*/
 
 		if (pthread_mutex_lock(&list_mutex) != 0)
-			throw std::runtime_error("Mutex lock failed");
+		throw std::runtime_error("Mutex lock failed");
 
 		fprintf(log_all, "Size of the list %d \n", packets_to_send.size());
 
@@ -288,258 +286,297 @@ int main(int argc, char* argv[])
 				//Sleep until wake (in microsec)
 				int64_t t2 = now() % 10000000000;
 				const int64_t wake = ((int64_t) (*it)->dump_ts - ((ts0 * (int64_t) 1000000)) / (int64_t) VIDEO_RATE) + st0;
-				fprintf(log_all, "%" PRId64 " wake = %" PRId64 ", seq = %" PRIu16 "\n",	t2, wake % 10000000000, (*it)->seq);
+				fprintf(log_all, "%" PRId64 " wake = %" PRId64 ", seq = %" PRIu16 "\n", t2, wake % 10000000000, (*it)->seq);
 
 				if (pthread_mutex_unlock(&list_mutex) != 0)
-					throw std::runtime_error("Mutex unlock failed");
+				throw std::runtime_error("Mutex unlock failed");
 
 				waiting(wake);
 				int64_t t3 = now() % 10000000000;
 				fprintf(log_all,"%" PRId64 " after waiting, really waiting = %" PRId64 " \n", t3, t3 - t2);
 
 				if (pthread_mutex_lock(&list_mutex) != 0)
-					throw std::runtime_error("Mutex lock failed");
+				throw std::runtime_error("Mutex lock failed");
 
 				break;
 			}
 		}
 
 		if (pthread_mutex_unlock(&list_mutex) != 0)
-			throw std::runtime_error("Mutex unlock failed");
+		throw std::runtime_error("Mutex unlock failed");
 #else
-		readtrace(filename);
+	/* Read frames from trace file and push them to the frame_list*/
 
-		while (term_flag == 0)
+	readtrace(filename);
+
+	while (term_flag == 0)
+	{
+		fprintf(log_all, "In the beginning of while loop \n");
+
+		/* It is neccesary to ctreate packets for sending */
+		create_packet();
+
+		if (pthread_mutex_lock(&frame_mutex) != 0)
+			throw std::runtime_error("Mutex lock failed");
+
+		if(ts0 == -1)
 		{
-			fprintf(log_all, "In the beginning of while loop \n");
+			ts0 = 0;
+			st0 = now();
+			time1 = st0;
+		}
 
-			if (pthread_mutex_lock(&frame_mutex) != 0)
-				throw std::runtime_error("Mutex lock failed");
-
-			for (std::list<struct trace *>::iterator it = frame_list.begin(); it != frame_list.end(); ++it)
+		for (std::list<struct trace *>::iterator it = frame_list.begin(); it != frame_list.end(); ++it)
+		{
+			if ((*it)->number == 0 || (*it)->location == NONALLOC)
 			{
-				if (ts0 == -1)
-				{
-					//In my case ts0 always = 0!!!Because we start to count from 0 in ts of packets
-					ts0 = (*it)->time;
-					st0 = now();
-					time1 = st0;
-				}
+				fprintf(log_all, "st0 = %" PRId64 " \n", st0);
+				fprintf(log_all, "t_frame = %" PRId64 " \n", (int64_t)((*it)->time*1000000));
 
-				if ((*it)->location == NONALLOC)
-				{
-					//Sleep until wake (in microsec)
-					int64_t t2 = now() % 10000000000;
-					const int64_t wake = (*it)->time + st0;
-					fprintf(log_all, "%" PRId64 " wake = %" PRId64 ", seq = %" PRIu16 "\n",	t2, wake % 10000000000, (*it)->number);
+				//Sleep until wake (in microsec)
+				int64_t t2 = now();
+				const int64_t wake = ((int64_t) ((*it)->time*1000000) - ((ts0 * (int64_t) 1000000)) / (int64_t) VIDEO_RATE) + st0;
+				fprintf(log_all, "%" PRId64 " wake = %" PRId64 ", frame_seq = %" PRIu16 "\n", t2, wake, (*it)->number);
 
-					if (pthread_mutex_unlock(&frame_mutex) != 0)
-						throw std::runtime_error("Mutex unlock failed");
-
-					waiting(wake);
-					int64_t t3 = now() % 10000000000;
-					fprintf(log_all,"%" PRId64 " after waiting, really waiting = %" PRId64 " \n", t3, t3 - t2);
-
-					if (pthread_mutex_lock(&frame_mutex) != 0)
-						throw std::runtime_error("Mutex lock failed");
-
-					break;
-				}
-			}
-
-			if (pthread_mutex_unlock(&frame_mutex) != 0)
-				throw std::runtime_error("Mutex unlock failed");
-
-#endif
-			//Select the paths for data transmission
-
-#if ROUND_ROBIN
-			thread_path = path_select(lastpath);
-#endif
-			/*Scheduling for packets*/
-#if PACKETS
-			thread_path = packets_path_scheduling(lastpath);
-#endif
-#if FRAMES
-			/*Scheduling for frames*/
-			thread_path = path_scheduling(lastpath);
-#endif
-#if SMART 						/*Sending Bit rate calculation!!!!*/
-			int64_t time2 = now();
-			int64_t T_scheduler = fb_interval * (drand48() + 0.5) /** 1000000*/;
-			fprintf(log_all, "T_scheduler = %" PRId64 "\n", T_scheduler);
-			fprintf(log_all, "time2 (%" PRId64 ") - time1(%" PRId64 ") = %" PRId64 "\n", time2, time1, time2 - time1);
-
-			/*Renew Sending Bit Rate values if recalculation interval is expired or we received the first RTCP RR packet*/
-			if (time2 - time1 > T_scheduler || RTCP_RR_flag == 1)
-			{
-				/*Calculate Sending Bit rate for each path*/
-				fprintf(log_all, "Time for recalculation of scheduler is expired \n");
-				SB_total = SB_calculation();
-
-				/*For calculation a total average bandwidth for a path*/
-				for (uint i = 0; i < SB_total.size(); i++)
-				{
-					if(path_status.at(i)->rrcount == 0 && path_status.at(i)->rrcount_prev == 0)
-					{
-						path_status.at(i)->rrcount_prev = -1;
-						counter.at(i)++;
-						SB_total_sum.at(SB_total_sum.at(i).second).first += SB_total.at(i).first;
-						//	SB_total_sum.at(i).second = SB_total.at(i).second;
-						fprintf(SB_log, "!!!%d %10f %d %d \n", SB_total_sum.at(i).second = SB_total.at(i).second, SB_total_sum.at(i).first, path_status.at(i)->rrcount, path_status.at(i)->rrcount_prev);
-					}
-
-					if(path_status.at(i)->rrcount != path_status.at(i)->rrcount_prev)
-					{
-						if(path_status.at(i)->rrcount != 0)
-						{
-							SB_total_sum.at(SB_total_sum.at(i).second).first += SB_total.at(i).first;
-							counter.at(i)++;
-							//	SB_total_sum.at(i).second = SB_total.at(i).second;
-							fprintf(SB_log, "%d %10f %d \n", SB_total_sum.at(i).second = SB_total.at(i).second, SB_total_sum.at(i).first, path_status.at(i)->rrcount);
-							path_status.at(i)->rrcount_prev = path_status.at(i)->rrcount;
-						}
-					}
-				}
-				time1 = time2;
-			}
-
-			/* It is neccesary to ctreate packets for sending */
-
-			create_packet();
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////
-			/*Erase frame from a list after creating packets on the basis of it*/
-			if (pthread_mutex_lock(&frame_mutex) != 0)
-				throw std::runtime_error("Mutex lock failed");
-
-			std::list<struct trace *>::iterator it;
-			for (it = frame_list.begin(); it != frame_list.end(); ++it)
-			{
-				if ((*it)->location == ALLOC)
-				{
-					fprintf(log_all, "Erase frame %" PRIu16 " from the list \n", (*it)->number);
-					it = frame_list.erase(it);
-				}
-			}
-
-			if (pthread_mutex_unlock(&frame_mutex) != 0)
-				throw std::runtime_error("Mutex unlock failed");
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-			/*Allocate packet to an appropriate path*/
-			thread_path = path_SB_scheduling(SB_total);
-#endif
-
-			//Call RTP thread
-			if (pthread_mutex_lock(&list_mutex) != 0)
-				throw std::runtime_error("Mutex lock failed");
-
-			if (!packets_to_send.empty())
-			{
-				for (uint i = 0; i < thread_path.size(); i++)
-				{
-					if (thread_path.at(i) == SENT)
-					{
-						int64_t t = now() % 10000000000;
-						fprintf(log_all, "%" PRId64 " Signal to rtp_send thread %d \n", t, i);
-						pthread_cond_signal(&path_status.at(i)->rtp_cond);
-					}
-				}
-
-				if (pthread_mutex_unlock(&list_mutex) != 0)
+				if (pthread_mutex_unlock(&frame_mutex) != 0)
 					throw std::runtime_error("Mutex unlock failed");
-			}
-			else
-			{
-				if (pthread_mutex_unlock(&list_mutex) != 0)
-					throw std::runtime_error("Mutex unlock failed");
-			}
 
-			lastpath = thread_path;
+				waiting(wake);
+				int64_t t3 = now();
+				fprintf(log_all, "%" PRId64 " after waiting, really waiting = %" PRId64 " \n", t3, t3 - t2);
 
-			if (pthread_mutex_lock(&list_mutex) != 0)
-				throw std::runtime_error("Mutex lock failed");
-
-			if (packets_to_send.empty() == 1)
-			{
-				term_flag = 1;
-				fprintf(log_all, "term_flag = %d \n", term_flag);
-
-				/*Remove all elements from lists of RTCP RR packets*/
-				if (pthread_mutex_lock(&rtcprr_mutex) != 0)
+				if (pthread_mutex_lock(&frame_mutex) != 0)
 					throw std::runtime_error("Mutex lock failed");
 
-				for(uint i = 0; i < rtcp_rr_packets.size(); i ++ )
-				{
-					rtcp_rr_packets.at(i).clear();
-					fprintf(log_all, " Cleaned rtcp rr list #%d \n", i);
-					printf("Cleaned rtcp rr list #%d \n", i);
-				}
-
-				if (pthread_mutex_unlock(&rtcprr_mutex) != 0)
-					throw std::runtime_error("Mutex unlock failed");
-
-
-				if (pthread_mutex_unlock(&list_mutex) != 0)
-					throw std::runtime_error("Mutex unlock failed");
+				break;
 			}
-			else
+		}
+
+		if (pthread_mutex_unlock(&frame_mutex) != 0)
+			throw std::runtime_error("Mutex unlock failed");
+
+#endif
+		//Select the paths for data transmission
+
+#if ROUND_ROBIN
+		thread_path = path_select(lastpath);
+#endif
+		/*Scheduling for packets*/
+#if PACKETS
+		thread_path = packets_path_scheduling(lastpath);
+#endif
+#if FRAMES
+		/*Scheduling for frames*/
+		thread_path = path_scheduling(lastpath);
+#endif
+#if SMART
+		/*Sending Bit rate calculation!!!!*/
+
+		int64_t time2 = now();
+		int64_t T_scheduler = fb_interval * (drand48() + 0.5) /** 1000000*/;
+		fprintf(log_all, "T_scheduler = %" PRId64 "\n", T_scheduler);
+		fprintf(log_all, "time2 (%" PRId64 ") - time1(%" PRId64 ") = %" PRId64 "\n", time2, time1, time2 - time1);
+
+		/*Renew Sending Bit Rate values if recalculation interval is expired or we received the first RTCP RR packet*/
+		if (time2 - time1 > T_scheduler || RTCP_RR_flag == 1)
+		{
+			/*Calculate Sending Bit rate for each path*/
+
+			fprintf(log_all, "Time for recalculation of scheduler is expired \n");
+			SB_total = SB_calculation();
+
+			time1 = time2;
+		}
+
+
+		/*Allocate packet to an appropriate path*/
+		thread_path = path_SB_scheduling(SB_total);
+#endif
+
+		//Call RTP thread
+		if (pthread_mutex_lock(&list_mutex) != 0)
+			throw std::runtime_error("Mutex lock failed");
+
+		if (!packets_to_send.empty())
+		{
+			for (uint i = 0; i < thread_path.size(); i++)
 			{
-				if (pthread_mutex_unlock(&list_mutex) != 0)
-					throw std::runtime_error("Mutex unlock failed");
+				if (thread_path.at(i) == SENT)
+				{
+					int64_t t = now();
+					fprintf(log_all, "%" PRId64 " Signal to rtp_send thread %d \n", t, i);
+					pthread_cond_signal(&path_status.at(i)->rtp_cond);
+				}
 			}
+
+			if (pthread_mutex_unlock(&list_mutex) != 0)
+				throw std::runtime_error("Mutex unlock failed");
+		}
+		else
+		{
+			if (pthread_mutex_unlock(&list_mutex) != 0)
+				throw std::runtime_error("Mutex unlock failed");
+		}
+
+		lastpath = thread_path;
+
+		/*For calculation a total average bandwidth for a path*/
+		for (uint i = 0; i < SB_total.size(); i++)
+		{
+			if (path_status.at(i)->rrcount == 0 && path_status.at(i)->rrcount_prev == 0)
+			{
+				path_status.at(i)->rrcount_prev = -1;
+				counter.at(i)++;
+				SB_total_sum.at(SB_total_sum.at(i).second).first +=	SB_total.at(i).first;
+				//	SB_total_sum.at(i).second = SB_total.at(i).second;
+				fprintf(SB_log, "!!!%d %10f %d %d \n", SB_total_sum.at(i).second = SB_total.at(i).second,
+						SB_total_sum.at(i).first, path_status.at(i)->rrcount, path_status.at(i)->rrcount_prev);
+			}
+
+			if (path_status.at(i)->rrcount != path_status.at(i)->rrcount_prev)
+			{
+				if (path_status.at(i)->rrcount != 0)
+				{
+					SB_total_sum.at(SB_total_sum.at(i).second).first += SB_total.at(i).first;
+					counter.at(i)++;
+					//	SB_total_sum.at(i).second = SB_total.at(i).second;
+					fprintf(SB_log, "%d %10f %d \n", SB_total_sum.at(i).second = SB_total.at(i).second, SB_total_sum.at(i).first,
+							path_status.at(i)->rrcount);
+					path_status.at(i)->rrcount_prev = path_status.at(i)->rrcount;
+				}
+			}
+		}
+
+		if (pthread_mutex_lock(&list_mutex) != 0)
+			throw std::runtime_error("Mutex lock failed");
+
+		fprintf(log_all, "Packets_to_send.empty = %d \n", packets_to_send.empty());
+
+		if (pthread_mutex_unlock(&list_mutex) != 0)
+			throw std::runtime_error("Mutex unlock failed");
+
+		///////////////////////////////////////////////////////////////////////////////////////////////////////
+		/*Erase frame from a list after creating packets on the basis of it*/
+		if (pthread_mutex_lock(&frame_mutex) != 0)
+			throw std::runtime_error("Mutex lock failed");
+
+		std::list<struct trace *>::iterator it;
+		for (it = frame_list.begin(); it != frame_list.end(); ++it)
+		{
+			if ((*it)->location == ALLOC)
+			{
+				fprintf(log_all, "Erase frame %" PRIu16 " from the list \n", (*it)->number);
+				it = frame_list.erase(it);
+			}
+		}
+
+		if (pthread_mutex_unlock(&frame_mutex) != 0)
+			throw std::runtime_error("Mutex unlock failed");
+
+		//////////////////////////////////////////////////////////////////////////////////////////////////////
+
+		if (pthread_mutex_lock(&frame_mutex) != 0)
+			throw std::runtime_error("Mutex lock failed");
+
+		if (pthread_mutex_lock(&list_mutex) != 0)
+			throw std::runtime_error("Mutex lock failed");
+
+		if (packets_to_send.empty() == 1 && frame_list.empty() == 1)
+		{
+			if (pthread_mutex_unlock(&frame_mutex) != 0)
+				throw std::runtime_error("Mutex lock failed");
+
+			if (pthread_mutex_unlock(&list_mutex) != 0)
+				throw std::runtime_error("Mutex lock failed");
+
+			term_flag = 1;
+			fprintf(log_all, "term_flag = %d \n", term_flag);
+
+			/*Remove all elements from lists of RTCP RR packets*/
+			if (pthread_mutex_lock(&rtcprr_mutex) != 0)
+				throw std::runtime_error("Mutex lock failed");
+
+			for (uint i = 0; i < rtcp_rr_packets.size(); i++)
+			{
+				rtcp_rr_packets.at(i).clear();
+				fprintf(log_all, " Cleaned rtcp rr list #%d \n", i);
+				printf("Cleaned rtcp rr list #%d \n", i);
+			}
+
+			if (pthread_mutex_unlock(&rtcprr_mutex) != 0)
+				throw std::runtime_error("Mutex unlock failed");
+
+			if (pthread_mutex_unlock(&list_mutex) != 0)
+				throw std::runtime_error("Mutex unlock failed");
+		}
+		else
+		{
+			if (pthread_mutex_unlock(&list_mutex) != 0)
+				throw std::runtime_error("Mutex unlock failed");
+
+			if (pthread_mutex_unlock(&frame_mutex) != 0)
+				throw std::runtime_error("Mutex lock failed");
 
 		}
-		if (fclose(log_rtp) == 0)
-			printf("Log_rtp file was successfully closed \n");
-		else
-			printf("Error during the procedure of closing log file: %d \n", errno);
 
-		if (fclose(log_rtcp_r) == 0)
-			printf("Log_rtcp_r file was successfully closed \n");
-		else
-			printf("Error during the procedure of closing log_rtcp_r file: %d \n",
-					errno);
+	}
+	if (fclose(log_rtp) == 0)
+		printf("Log_rtp file was successfully closed \n");
+	else
+		printf("Error during the procedure of closing log file: %d \n", errno);
 
-		if (fclose(log_rtcp_s) == 0)
-			printf("Log_rtcp_s file was successfully closed \n");
-		else
-			printf("Error during the procedure of closing Log_rtcp_s file: %d \n",
-					errno);
+	if (fclose(log_rtcp_r) == 0)
+		printf("Log_rtcp_r file was successfully closed \n");
+	else
+		printf("Error during the procedure of closing log_rtcp_r file: %d \n",
+		errno);
 
-		if (fclose(log_all) == 0)
-			printf("Log_all file was successfully closed \n");
-		else
-			printf("Error during the procedure of closing log_all file: %d \n",
-					errno);
+	if (fclose(log_rtcp_s) == 0)
+		printf("Log_rtcp_s file was successfully closed \n");
+	else
+		printf("Error during the procedure of closing Log_rtcp_s file: %d \n",
+		errno);
 
-		if (term_flag == 1)
-		{
-			for (int i = 0; i < n; i++)
-			{
-				printf("Total number of packet sent to path %d = %d \n", i, path_status.at(i)->sender_pc);
-				printf("Total lost for path %d = %f \n", i, path_status.at(i)->total_lossrate);
-			}
+	if (fclose(log_quantity) == 0)
+		printf("Log_quantity file was successfully closed \n");
+	else
+		printf("Error during the procedure of closing Log_quantity file: %d \n",
+		errno);
+
+	if (fclose(log_all) == 0)
+		printf("Log_all file was successfully closed \n");
+	else
+		printf("Error during the procedure of closing log_all file: %d \n",
+		errno);
+
+	if (term_flag == 1)
+	{
+		for (int i = 0; i < n; i++) {
+			printf("Total number of packet sent to path %d = %d \n", i,
+					path_status.at(i)->sender_pc);
+			printf("Total lost for path %d = %f \n", i,
+					path_status.at(i)->total_lossrate);
+		}
+
+		int64_t t_finish = now();
+		printf("Total_time = %" PRId64 " \n", t_finish-st0);
 
 #ifdef SMART
-			for (uint i = 0; i < SB_total_sum.size(); i ++)
-			{
-				SB_total_sum.at(i).first = SB_total_sum.at(i).first / counter.at(i);
 
-				printf("Size of SB_total_sum for path %d = %u \n", i, counter.at(i));
-	//			fprintf(log_all,"Size of SB_total_sum for path %d = %u \n", i, counter.at(i));
-				printf("Average sending bit rate for path %d = %f \n", SB_total_sum.at(i).second, SB_total_sum.at(i).first);
-//				fprintf(log_all,"Average sending bit rate for path %d = %f \n", SB_total_sum.at(i).second, SB_total_sum.at(i).first);
-			}
-#endif
+		for (uint i = 0; i < SB_total_sum.size(); i++)
+		{
+			SB_total_sum.at(i).first = SB_total_sum.at(i).first / counter.at(i);
+
+			printf("Size of SB_total_sum for path %d = %u \n", i,
+					counter.at(i));
+			printf("Average sending bit rate for path %d = %f \n",
+					SB_total_sum.at(i).second, SB_total_sum.at(i).first);
 		}
-
-		return 0;
+#endif
 	}
 
+	return 0;
+}
 
 void getargs(int argc, char* argv[], char * filename, int * port, char ip[][20],
 		char iptx[], int * txport, char ipout[][20]) {
@@ -594,7 +631,8 @@ void getargs(int argc, char* argv[], char * filename, int * port, char ip[][20],
 			strcpy(filename, optarg);
 			break;
 		case 'h':
-			printf("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<MPRTP_imp HELP>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n\n");
+			printf(
+					"<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<MPRTP_imp HELP>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n\n");
 			printf("To run the program as multipath sender:\n\n");
 			printf(
 					"MPRTP_imp -a 192.168.10.10:4000 -b 192.168.12.30:4002 -c 192.168.14.50:4004 -e 192.168.14.50 -g 192.168.14.50 -f im2.rtp \n");
@@ -606,7 +644,8 @@ void getargs(int argc, char* argv[], char * filename, int * port, char ip[][20],
 			exit(0);
 		default:
 			printf("One or more invalid arguments\n");
-			printf("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<MPRTP_imp HELP>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n\n");
+			printf(
+					"<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<MPRTP_imp HELP>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n\n");
 			printf("To run the program as multipath sender:\n\n");
 			printf(
 					"MPRTP_imp -a 192.168.10.10:4000 -b 192.168.12.30:4002 -c 192.168.14.50:4004 -e 192.168.14.50 -g 192.168.14.50 -f im2.rtp \n");
@@ -627,7 +666,8 @@ void signalHandler(int sig) {
 	globalTerminationFlag = true;
 }
 
-int64_t now() {
+int64_t now()
+{
 	struct timeval timenow;
 	gettimeofday(&timenow, NULL);
 	return (int64_t) timenow.tv_sec * 1000000 + timenow.tv_usec;
@@ -640,11 +680,12 @@ void MPRTP_update_subflow(struct mprtphead * mrheader, char * buf, int x)
 	//	y = ntohs(mrheader->subflowseq);
 	/*set x bit*/
 	buf[0] = buf[0] | EXT_MASK;
-	fprintf(log_all, "MPRTP Subflowseq for path %d = %" PRIu16 "\n", x, path_status.at(x)->seq_num);
+	fprintf(log_all, "MPRTP Subflowseq for path %d = %" PRIu16 "\n", x,
+			path_status.at(x)->seq_num);
 	memcpy(buf + 12, mrheader, sizeof(struct mprtphead));
 	path_status.at(x)->seq_num++;
 	mrheader->subflowseq = htons(path_status.at(x)->seq_num);
-	printf("Inscrease subflowseq %" PRIu16 "\n", ntohs(mrheader->subflowseq));
+	fprintf(log_all,"Inscrease subflowseq %" PRIu16 "\n", ntohs(mrheader->subflowseq));
 //	mrheader->subflowseq = htons(path_status.at(x)->seq_num++);
 }
 
@@ -658,16 +699,14 @@ void insert_data_to_list(struct rtppacket * packet)
 
 	int64_t t = now() % 10000000000;
 	packets_to_send.push_back(packet);
-	fprintf(log_all, "%" PRId64 " Push packet to the list %" PRIu16 " \n", t, packet->seq);
+	fprintf(log_all, "%" PRId64 " Push packet to the list %" PRIu64 " \n", t, packet->seq);
 
 	if (pthread_mutex_unlock(&list_mutex) != 0)
 		throw std::runtime_error("Mutex unlock failed");
 }
 
-int create_threads(int n, char ipnew[][20], int * txportnew, char ipout[][20])
-{
-	for (int i = 0; i < n; i++)
-	{
+int create_threads(int n, char ipnew[][20], int * txportnew, char ipout[][20]) {
+	for (int i = 0; i < n; i++) {
 		strncpy(path_status.at(i)->ip, ipnew[i], 20);
 		strncpy(path_status.at(i)->ipout, ipout[i], 20);
 
@@ -722,13 +761,11 @@ int create_threads(int n, char ipnew[][20], int * txportnew, char ipout[][20])
 	return 1;
 }
 
-int openfile(char *filename)
-{
+int openfile(char *filename) {
 	struct stat statbuf;
 //	char filename[255] = "/home/streaming/MPRTP/output_dump1";
 
 	int fd = open(filename, O_RDONLY);
-	printf("FD = %d \n", fd);
 	if (fd < 0)
 	{
 		printf("Error opening file : %s\n", strerror(errno));
@@ -737,7 +774,6 @@ int openfile(char *filename)
 	{
 		if (fstat(fd, &statbuf) != 0)
 		{
-			printf("It is a pity \n");
 			printf("Error fstat %d", errno);
 			close(fd);
 			return -1;
@@ -748,17 +784,14 @@ int openfile(char *filename)
 	 * The next read operation will ensure only packets are read. */
 
 	char tmp[50];
-	if (read(fd, tmp, 1) != 1)
-	{
+	if (read(fd, tmp, 1) != 1) {
 		printf("Error while reading file \n");
 		exit(0);
 	}
 
-	if (tmp[0] == '#')
-	{
+	if (tmp[0] == '#') {
 		while (1) {
-			if (read(fd, tmp, 1) != 1)
-			{
+			if (read(fd, tmp, 1) != 1) {
 				printf("While reading file (length read: 1): %d, %s\n", errno,
 						strerror(errno));
 				break;
@@ -768,15 +801,12 @@ int openfile(char *filename)
 
 		}
 
-		if (read(fd, tmp, 16) != 16)
-		{
+		if (read(fd, tmp, 16) != 16) {
 			printf("While reading file (length read: 1): %d, %s\n", errno,
 					strerror(errno));
 		}
 
-	}
-	else
-	{
+	} else {
 		printf("YEYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY\n");
 		if (lseek(fd, 0, SEEK_SET) < 0)
 			printf("OH SHIT!!!\n");
@@ -784,20 +814,18 @@ int openfile(char *filename)
 	return fd;
 }
 
-int readtrace(char *filename)
-{
+int readtrace(char *filename) {
 	struct trace *frame = NULL;
 	int allread = 0;
 
-	std::vector <int> size(LAYERS*FPS,0);
-	std::vector <double> PSNRY(LAYERS*FPS,0);
-	std::vector <double> PSNRU(LAYERS*FPS,0);
-	std::vector <double> PSNRV(LAYERS*FPS,0);
+	std::vector<int> size(LAYERS * FPS, 0);
+	std::vector<double> PSNRY(LAYERS * FPS, 0);
+	std::vector<double> PSNRU(LAYERS * FPS, 0);
+	std::vector<double> PSNRV(LAYERS * FPS, 0);
 
 	FILE *fd = fopen("/home/ekaterina/experiment/tracefile", "r");
 
-	if (fd == NULL)
-	{
+	if (fd == NULL) {
 		printf("Read called without fd opening file\n");
 		printf("While reading fd file : %d, %s\n", errno, strerror(errno));
 		fclose(fd);
@@ -805,42 +833,40 @@ int readtrace(char *filename)
 	}
 	else
 	{
-		fprintf(log_all,"Opened trace file  \n");
+		fprintf(log_all, "Opened trace file  \n");
 
 		/* read from a trace file information*/
-		while(allread == 0)
-		{
+		while (allread == 0) {
 			frame = new struct trace;
 			memset(frame, 0, sizeof(frame));
 
-			if(fscanf(fd, "%d %lf %s %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf"
-					"%d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf",
-					&frame->number, &frame->time, frame->type,
-					&size.at(0), &PSNRY.at(0), &PSNRU.at(0),&PSNRV.at(0),
-					&size.at(1), &PSNRY.at(1), &PSNRU.at(1),&PSNRV.at(1),
-					&size.at(2), &PSNRY.at(2), &PSNRU.at(2),&PSNRV.at(2),
-					&size.at(3), &PSNRY.at(3), &PSNRU.at(3),&PSNRV.at(3),
-					&size.at(4), &PSNRY.at(4), &PSNRU.at(4),&PSNRV.at(4),
-					&size.at(5), &PSNRY.at(5), &PSNRU.at(5),&PSNRV.at(5),
-					&size.at(6), &PSNRY.at(6), &PSNRU.at(6),&PSNRV.at(6),
-					&size.at(7), &PSNRY.at(7), &PSNRU.at(7),&PSNRV.at(7),
-					&size.at(8), &PSNRY.at(8), &PSNRU.at(8),&PSNRV.at(8),
-					&size.at(9), &PSNRY.at(9), &PSNRU.at(9),&PSNRV.at(9),
-					&size.at(10), &PSNRY.at(10), &PSNRU.at(10),&PSNRV.at(10),
-					&size.at(11), &PSNRY.at(11), &PSNRU.at(11),&PSNRV.at(11)) != EOF)
-			{
+			if (fscanf(fd,
+					"%d %lf %s %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf"
+							"%d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf %d %lf %lf %lf",
+					&frame->number, &frame->time, frame->type, &size.at(0),
+					&PSNRY.at(0), &PSNRU.at(0), &PSNRV.at(0), &size.at(1),
+					&PSNRY.at(1), &PSNRU.at(1), &PSNRV.at(1), &size.at(2),
+					&PSNRY.at(2), &PSNRU.at(2), &PSNRV.at(2), &size.at(3),
+					&PSNRY.at(3), &PSNRU.at(3), &PSNRV.at(3), &size.at(4),
+					&PSNRY.at(4), &PSNRU.at(4), &PSNRV.at(4), &size.at(5),
+					&PSNRY.at(5), &PSNRU.at(5), &PSNRV.at(5), &size.at(6),
+					&PSNRY.at(6), &PSNRU.at(6), &PSNRV.at(6), &size.at(7),
+					&PSNRY.at(7), &PSNRU.at(7), &PSNRV.at(7), &size.at(8),
+					&PSNRY.at(8), &PSNRU.at(8), &PSNRV.at(8), &size.at(9),
+					&PSNRY.at(9), &PSNRU.at(9), &PSNRV.at(9), &size.at(10),
+					&PSNRY.at(10), &PSNRU.at(10), &PSNRV.at(10), &size.at(11),
+					&PSNRY.at(11), &PSNRU.at(11), &PSNRV.at(11)) != EOF) {
 
-		//		fprintf(log_all,"frame_number = %d, frame_time = %f, frame_type = %s \n ", frame->number, frame->time, frame->type);
+				//		fprintf(log_all,"frame_number = %d, frame_time = %f, frame_type = %s \n ", frame->number, frame->time, frame->type);
 
 				uint s = 0;
-				for(uint i = 0; i < frame->size.at(i).size(); i ++)
+				for (uint i = 0; i < frame->size.at(i).size(); i++)
 				{
-					for(uint j = 0; j < frame->size.size(); j ++)
+					for (uint j = 0; j < frame->size.size(); j++)
 					{
-						for( ; s < size.size(); )
+						for (; s < size.size();)
 						{
-
-						/*Since dimension of all three arrays the same we will use the one loop for all*/
+							/*Since dimension of all three arrays the same we will use the one loop for all*/
 							frame->size.at(j).at(i) = size.at(s);
 							frame->PSNRY.at(j).at(i) = PSNRY.at(s);
 							frame->PSNRU.at(j).at(i) = PSNRU.at(s);
@@ -872,7 +898,7 @@ int readtrace(char *filename)
 			}
 			else
 			{
-				fprintf (log_all, "The end of trace file. All data is read\n");
+				fprintf(log_all, "The end of trace file. All data is read\n");
 				fclose(fd);
 				allread = 1;
 			}
@@ -881,8 +907,7 @@ int readtrace(char *filename)
 	return 0;
 }
 
-void insert_data_to_frame_list(struct trace * frame)
-{
+void insert_data_to_frame_list(struct trace * frame) {
 	if (pthread_mutex_lock(&frame_mutex) != 0)
 		throw std::runtime_error("Mutex lock failed");
 
@@ -943,8 +968,7 @@ int readpacket(struct rtppacket *packet, int fd) {
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	if (read(fd, packet->buf + 24, packet->payloadlen) != packet->payloadlen)
 	{
-		printf("While reading file (length read: %d): %d, %s\n",
-				packet->packetlen, errno, strerror(errno));
+		fprintf(log_all,"While reading file (length read: %d): %d, %s\n", packet->packetlen, errno, strerror(errno));
 		return 0;
 	}
 
@@ -968,7 +992,8 @@ int readpacket(struct rtppacket *packet, int fd) {
 	return 1;
 }
 
-void* rtp_send(void *arg) {
+void* rtp_send(void *arg)
+{
 	int x = (long) ((int *) arg);
 	int64_t time1 = -1;
 	int byte_sent = 0;
@@ -978,7 +1003,8 @@ void* rtp_send(void *arg) {
 		throw std::runtime_error("Mutex lock failed");
 
 	int fds = UDP_Init(x, path_status.at(x)->ip, 55000 + (2 * x), path_status.at(x)->ipout);
-	if (fds < 0) {
+	if (fds < 0)
+	{
 		printf("UDP socket initialize for RTP failed");
 		pthread_exit(NULL);
 	}
@@ -988,7 +1014,8 @@ void* rtp_send(void *arg) {
 
 	//	SetnonBlocking(path_status.at(x)->rtcp_sock);
 
-	if (path_status.at(x)->rtcp_sock < 0) {
+	if (path_status.at(x)->rtcp_sock < 0)
+	{
 		printf("UDP socket initialize for RTCP failed");
 		pthread_exit(NULL);
 	}
@@ -996,7 +1023,8 @@ void* rtp_send(void *arg) {
 	if (pthread_mutex_unlock(&path_status.at(x)->rtp_mutex) != 0)
 		throw std::runtime_error("Mutex unlock failed");
 
-	while (globalTerminationFlag == false) {
+	while (globalTerminationFlag == false)
+	{
 		if (pthread_mutex_lock(&list_mutex) != 0)
 			throw std::runtime_error("Mutex lock failed");
 
@@ -1007,7 +1035,7 @@ void* rtp_send(void *arg) {
 			int64_t t1 = now() % 10000000000;
 			fprintf(log_all, "%" PRId64 " before FOR rtp_send \n", t1);
 
-			for (std::list<struct rtppacket *>::iterator it = packets_to_send.begin(); it != packets_to_send.end() && p == NULL; )
+			for (std::list<struct rtppacket *>::iterator it = packets_to_send.begin(); it != packets_to_send.end() && p == NULL;)
 			{
 				//If the number of path in (struct rtppacket *packet) is equal to the number of interface -> send the packet
 				//	if ((*it)->path == x)
@@ -1015,37 +1043,27 @@ void* rtp_send(void *arg) {
 				int count_sent = std::count((*it)->path.begin(), (*it)->path.end(), SENT);
 				int count_nsent = std::count((*it)->path.begin(), (*it)->path.end(), NSENT);
 
-			//	fprintf(log_all, "RTP_send: #%d count_sent = %d, count_nsent = %d \n", (*it)->seq, count_sent, count_nsent);
-
-				/*		if ((std::count((*it)->path.begin(), (*it)->path.end(), DELETE)) == NUM)
-				 (*it)->erase = 1;*/
-
 				if (count_sent == NUM || count_nsent != 0 || (*it)->erase == 0)
 				{
-					//	printf("Packet number %d path %d \n", (*it)->seq, x);
 					if ((*it)->path.at(x) == SENT)
 					{
 						byte_sent = sending_rtp(x, fds, *it);
 						(*it)->path.at(x) = DELETE;
 
-						for (uint i = 0; i < (*it)->path.size(); i++) {
+						for (uint i = 0; i < (*it)->path.size(); i++)
+						{
 							if ((*it)->path.at(i) == NSENT)
 								(*it)->path.at(i) = DELETE;
 
-							fprintf(log_all, "!!!path.at(%d) = enum %d, seq = %d \n", x, (*it)->path.at(i), (*it)->seq);
-							printf("!!!path.at(%d) = enum %d, seq = %d \n", x, (*it)->path.at(i), (*it)->seq);
+							fprintf(log_all, "!!!path.at(%d) = enum %d, seq = %" PRIu64 " \n", x, (*it)->path.at(i), (*it)->seq);
 						}
 						p = *it;
 					}
 				}
 
-				if ((std::count((*it)->path.begin(), (*it)->path.end(), DELETE))== NUM)
+				if ((std::count((*it)->path.begin(), (*it)->path.end(), DELETE)) == NUM)
 				{
-					printf("Erase packet %d from the list by thread %d \n",
-							p->seq, x);
-					fprintf(log_all,
-							"Erase packet %d from the list by thread %d \n",
-							p->seq, x);
+					fprintf(log_all, "Erase packet %" PRIu64 " from the list by thread %d \n", p->seq, x);
 					p->erase = 1;
 					packets_to_send.erase(it);
 				}
@@ -1055,22 +1073,19 @@ void* rtp_send(void *arg) {
 			int64_t t2 = now() % 10000000000;
 			fprintf(log_all, "%" PRId64 " after FOR rtp_send \n", t2);
 
-			if (p == NULL) {
+			if (p == NULL)
+			{
 				int64_t t1 = now() % 10000000000;
-				fprintf(log_all, "%" PRId64 " before waiting in rtp_send \n",
-						t1);
+				fprintf(log_all, "%" PRId64 " before waiting in rtp_send \n", t1);
 				pthread_cond_wait(&path_status.at(x)->rtp_cond, &list_mutex);
 				int64_t t2 = now() % 10000000000;
-				fprintf(log_all,
-						"%" PRId64 " after waiting in rtp_send, Send time in waiting = %" PRId64 " \n",
-						t2, t2 - t1);
+				fprintf(log_all, "%" PRId64 " after waiting in rtp_send, Send time in waiting = %" PRId64 " \n", t2, t2 - t1);
 			}
 		}
 
 		if (p->erase == 1)
 		{
-			fprintf(log_all, "%d Delete packet p #%d \n", x, p->seq);
-			printf("%d Delete packet p #%d \n", x, p->seq);
+			fprintf(log_all, "%d Delete packet p #%" PRIu64 " \n", x, p->seq);
 			delete p;
 		}
 
@@ -1081,15 +1096,15 @@ void* rtp_send(void *arg) {
 			throw std::runtime_error("Mutex lock failed");
 
 		path_status.at(x)->sender_oc += byte_sent; // counts in payload octets, e.t. in bytes
-		path_status.at(x)->sender_pc += 1; 		   // counts in quantity of packets (1,2,3,....)
+		path_status.at(x)->sender_pc += 1; // counts in quantity of packets (1,2,3,....)
 
 		/*add information to path characteristics about the number of packets sent between two consecutive RR packets*/
 		path_status.at(x)->rtp_oc_count += byte_sent;
 
-		fprintf(log_all, "%d RTP payload count between two consecutive RTCP RR = %" PRId16 " \n", x, path_status.at(x)->rtp_oc_count);
+		fprintf(log_all, "%d RTP payload count between two consecutive RTCP RR = %" PRId16 " \n",x, path_status.at(x)->rtp_oc_count);
 
-		fprintf(log_all, "%d  %10" PRIu32 " = sender_oc, %5" PRIu32 " = sender_pc \n", x, path_status.at(x)->sender_oc, path_status.at(x)->sender_pc);
-		printf("%d %10" PRIu32 " = sender_oc, %5" PRIu32 " = sender_pc \n", x, path_status.at(x)->sender_oc, path_status.at(x)->sender_pc);
+		fprintf(log_all, "%d  %10" PRIu32 " = sender_oc, %5" PRIu32 " = sender_pc \n", x,
+				path_status.at(x)->sender_oc, path_status.at(x)->sender_pc);
 
 		if (pthread_mutex_unlock(&path_status.at(x)->rtp_mutex) != 0)
 			throw std::runtime_error("Mutex unlock failed");
@@ -1101,23 +1116,22 @@ void* rtp_send(void *arg) {
 		fprintf(log_all, "avg_rtcp_size = %d \n", avg_rtcp_size);
 
 		if (time1 == -1) {
-			printf("st0 later = %" PRId64" \n", st0);
+			fprintf(log_all,"st0 later = %" PRId64" \n", st0);
 			time1 = st0;
-			printf("time1 = %" PRId64" \n", time1);
+			fprintf(log_all,"time1 = %" PRId64" \n", time1);
 		}
 
-		fb_interval = rtcp_interval(i_senders * 2, i_senders, RTCP_BW, 1,
-				56/*RTCPSR+UDP+IP*/, &avg_rtcp_size, 1, 0.1);
-		printf("fb_interval = %" PRId64" \n", fb_interval);
+		fb_interval = rtcp_interval(i_senders * 2, i_senders, RTCP_BW, 1, 56/*RTCPSR+UDP+IP*/, &avg_rtcp_size, 1, 0.1);
+		fprintf(log_all,"fb_interval = %" PRId64" \n", fb_interval);
 
 		int64_t time2 = now();
 
-		printf("time2 = %" PRId64"\n", time2);
+/*		printf("time2 = %" PRId64"\n", time2);
 
 		printf("time2_int = %" PRId64"\n", time2 / 1000000);
 		printf("time2_frac = %" PRId64"\n", time2 % 1000000);
-
-		printf("t2-t1 = %" PRId64" thread %d \n", time2 - time1, x);
+*/
+		fprintf(log_all,"t2-t1 = %" PRId64" thread %d \n", time2 - time1, x);
 
 		//	if(((t2.tv_sec-t1.tv_sec)+((t2.tv_usec-t1.tv_usec)/1000000)) > fb_interval)
 		if (time2 - time1 > fb_interval)
@@ -1144,7 +1158,8 @@ void MPRTP_Init_subflow(struct mprtphead * mrheader, uint16_t x) {
 	mrheader->mprtype = htons(MPR_TYPE_SUBFLOW);
 }
 
-void waiting(const int64_t wake) {
+void waiting(const int64_t wake)
+{
 	/*int64_t time_now = now();
 	 printf("time_now = %" PRId64 " \n", time_now);
 	 // Calculate how much time gone from st0 until this ts
@@ -1166,11 +1181,15 @@ void waiting(const int64_t wake) {
 	 }*/
 	int64_t time_now = now();
 //	printf("time_now = %" PRId64 " \n", time_now);
-	if (wake > time_now) {
-		if (wake - time_now < 1000000) {
+	if (wake > time_now)
+	{
+		if (wake - time_now < 1000000)
+		{
 //			printf("Waiting %" PRId64 " \n", wake - time_now);
 			usleep(wake - time_now);
-		} else {
+		}
+		else
+		{
 			sleep((wake - time_now) / 1000000);
 			time_now = now();
 			if (wake > time_now)
@@ -1200,11 +1219,9 @@ void *send_rtcp(void *arg) {
 				(struct sockaddr *) &rtcpsender, sizeof(rtcpsender)) < 0) {
 			perror("rtcpsr send");
 			pthread_exit(NULL);
-		}
-		else
-		{
-			printf("Send RTCP SR on path %d, rtp count = %" PRIu32 ", ts = %" PRIu32 " \n", x, rtcpsr.sender_pc, rtcpsr.rtpts);
-			fprintf(log_all, "%" PRId64 " Send RTCP SR on path %d, rtp count = %" PRIu32 ", ts = %" PRIu32 " \n",
+		} else {
+			fprintf(log_all,
+					"%" PRId64 " Send RTCP SR on path %d, rtp count = %" PRIu32 ", ts = %" PRIu32 " \n",
 					t, x, rtcpsr.sender_pc, rtcpsr.rtpts);
 
 			if (pthread_mutex_lock(&path_status.at(x)->rtp_mutex) != 0)
@@ -1238,7 +1255,7 @@ int getrtcpsr(struct rtcpsrbuf * rtcpsr, int64_t time2, int x) {
 
 	rtcpsr->ntpts_frac = htonl(tmp1);
 
-	printf("ntps_frac = %" PRIu32 " \n", rtcpsr->ntpts_frac);
+//	printf("ntps_frac = %" PRIu32 " \n", rtcpsr->ntpts_frac);
 
 	rtcpsr->rtpts = 0;
 
@@ -1247,7 +1264,7 @@ int getrtcpsr(struct rtcpsrbuf * rtcpsr, int64_t time2, int x) {
 
 	rtcpsr->sender_oc = path_status.at(x)->sender_oc;
 	rtcpsr->sender_pc = path_status.at(x)->sender_pc;
-	printf("sender_oc in rtcpsr = %" PRIu32 " \n", rtcpsr->sender_oc);
+	fprintf(log_all,"sender_oc in rtcpsr = %" PRIu32 " \n", rtcpsr->sender_oc);
 
 	if (pthread_mutex_unlock(&path_status.at(x)->rtp_mutex) != 0)
 		throw std::runtime_error("Mutex unlock failed");
@@ -1258,21 +1275,19 @@ int getrtcpsr(struct rtcpsrbuf * rtcpsr, int64_t time2, int x) {
 	if (pthread_mutex_lock(&rtcpsr_mutex) != 0)
 		throw std::runtime_error("Mutex lock failed");
 
-	fprintf(log_rtcp_s, "%d  %" PRId64 "   %10" PRIu32 " %10" PRIu32 " \n", x, time2, rtcpsr->sender_oc, rtcpsr->sender_pc);
-	printf("%d  %" PRId64 "   %10" PRIu32 " %10" PRIu32 " \n", x, time2, rtcpsr->sender_oc, rtcpsr->sender_pc);
+	fprintf(log_rtcp_s, "%d  %" PRId64 "   %10" PRIu32 " %10" PRIu32 " \n", x,
+			time2, rtcpsr->sender_oc, rtcpsr->sender_pc);
 
 	if (pthread_mutex_unlock(&rtcpsr_mutex) != 0)
 		throw std::runtime_error("Mutex unlock failed");
 
-	printf(" Time of sending RTCP Report %" PRId64 " : %" PRId64 " \n",
+	fprintf(log_all," Time of sending RTCP Report %" PRId64 " : %" PRId64 " \n",
 			(int64_t) rtcpsr->ntpts, (int64_t) rtcpsr->ntpts_frac);
 	return 28;
 }
 
-void* recv_rtcp(void *arg)
-{
+void* recv_rtcp(void *arg) {
 	int x = (long) ((int *) arg);
-	printf("x = %d \n", x);
 
 	struct sockaddr_in reciever;
 	socklen_t reciever_size;
@@ -1291,8 +1306,7 @@ void* recv_rtcp(void *arg)
 
 	/*check for rtcp rr*/
 
-	while (globalTerminationFlag == false)
-	{
+	while (globalTerminationFlag == false) {
 		int64_t time1 = now() % 10000000000;
 //		fprintf(log_all, "%" PRId64 " Time of receiving RR before select \n", time1);
 
@@ -1302,39 +1316,28 @@ void* recv_rtcp(void *arg)
 
 		int sel = select(sock + 1, &rset, NULL, NULL, NULL);
 
-		if (sel == -1)
-		{
+		if (sel == -1) {
 			perror("error in select!");
 			throw std::runtime_error("Bad");
-		}
-		else
-		{
+		} else {
 			//	rtcpbuf = new char[BUFLEN];
-			if (FD_ISSET(sock, &rset))
-			{
+			if (FD_ISSET(sock, &rset)) {
 				reciever_size = sizeof reciever;
-				printf("Waiting for RCTP RR packet \n");
+				fprintf(log_all,"Waiting for RCTP RR packet \n");
 
 				int datalen = recvfrom(sock, &rtcpbuf, 100, 0,
 						(struct sockaddr *) &reciever, &reciever_size);
 				if (datalen <= 0) {
 					perror("rtcp recv");
 					throw std::runtime_error("Bad");
-				}
-				else
-				{
-					if (!(unsigned char) rtcpbuf.b1 ^ RTCP_RR_B2)
-					{
-						printf("RTCP RR received...\n");
+				} else {
+					if (!(unsigned char) rtcpbuf.b1 ^ RTCP_RR_B2) {
 						fprintf(log_all, "RTCP RR received...\n");
 
 						int64_t time2 = now() % 10000000000;
 
-						printf("%d  %" PRId64 " Time of receiving RR after select \n",x, time2);
-						fprintf(log_all,"%d Time of receiving RR after select %" PRId64 "\n",x, time2);
-						fprintf(log_all, " Difference %" PRId64 "\n",time2 - time1);
-
-						printf("datalen = %d \n", datalen);
+						fprintf(log_all, "%d Time of receiving RR after select %" PRId64 "\n", x, time2);
+						fprintf(log_all, " Difference %" PRId64 "\n", time2 - time1);
 
 						rtcprr = new struct rtcprrbuf;
 						memset(rtcprr, 0, sizeof(rtcprr));
@@ -1345,11 +1348,10 @@ void* recv_rtcp(void *arg)
 						fprintf(SB_log, "RRCOUNT = %d\n", path_status.at(x)->rrcount);
 
 						/*Set RTCP_RR_flag to true after receiving the first RTCP packet*/
-						if(path_status.at(x)->rrcount == 0)
+						if (path_status.at(x)->rrcount == 0)
 							RTCP_RR_flag = 0;
-						else
-						{
-							if(path_status.at(x)->rrcount == 1)
+						else {
+							if (path_status.at(x)->rrcount == 1)
 								RTCP_RR_flag = 1;
 							else
 								RTCP_RR_flag = 2;
@@ -1359,39 +1361,43 @@ void* recv_rtcp(void *arg)
 							throw std::runtime_error("Mutex lock failed");
 
 						/*If the size of a RTCP RR list is 5, delete the first element from a list*/
-						if(rtcp_rr_packets.at(x).size() == 5)
-						{
-							std::list<struct rtcprrbuf *>::iterator itb = rtcp_rr_packets.at(x).begin();
+						if (rtcp_rr_packets.at(x).size() == 5) {
+							std::list<struct rtcprrbuf *>::iterator itb =
+									rtcp_rr_packets.at(x).begin();
 							p = *itb;
 							rtcp_rr_packets.at(x).erase(itb);
-							fprintf(log_all, "%d Delete the first RTCP RR packet from a list \n",x);
-							fprintf(log_all, "%d_list_size = %d \n", x, rtcp_rr_packets.at(x).size());
+							fprintf(log_all,
+									"%d Delete the first RTCP RR packet from a list \n",
+									x);
+							fprintf(log_all, "%d_list_size = %zu \n", x, rtcp_rr_packets.at(x).size());
 							delete p;
 						}
 
 						rtcp_rr_packets.at(x).push_back(rtcprr);
-						fprintf(log_all, "%d Size of a rtcprr list = %u \n", x, rtcp_rr_packets.at(x).size());
+						fprintf(log_all, "%d Size of a rtcprr list = %zu \n", x,	rtcp_rr_packets.at(x).size());
 
-						fprintf(log_all,"************************************************************\n");
-						fprintf(log_all,"%d bnd just after filling a list %f \n", x, rtcp_rr_packets.at(x).back()->Bnd);
+						fprintf(log_all,
+								"************************************************************\n");
+						fprintf(log_all,
+								"%d bnd just after filling a list %f \n", x,
+								rtcp_rr_packets.at(x).back()->Bnd);
 
 						if (pthread_mutex_unlock(&rtcprr_mutex) != 0)
 							throw std::runtime_error("Mutex unlock failed");
 
 						path_status.at(x)->rtp_oc_count = 0;
-						fprintf(log_all, "%d rrcount in recv_rtcp %d \n", x, path_status.at(x)->rrcount);
+						fprintf(log_all, "%d rrcount in recv_rtcp %d \n", x,
+								path_status.at(x)->rrcount);
 					}
 				}
-			}
-			else
+			} else
 				printf("Don't see handle of a socket!!!");
 		}
 	}
 	return NULL;
 }
 
-void rtcprr_list(struct rtcprrbuf * rtcprr, struct rtcprrbuf * buf, int x)
-{
+void rtcprr_list(struct rtcprrbuf * rtcprr, struct rtcprrbuf * buf, int x) {
 	int64_t rrtime = 0;
 	double delta_t = 0;
 	rrtime = now();
@@ -1422,8 +1428,10 @@ void rtcprr_list(struct rtcprrbuf * rtcprr, struct rtcprrbuf * buf, int x)
 
 	// calculate RTT in microsec
 
-	int64_t lsr = (int64_t) rtcprr->lsr_frac * 1000000 / 65536 + (int64_t) rtcprr->lsr * 1000000;
-	rtcprr->rtt = rrtime - (int64_t) rtcprr->dlsr * 1000000 - (int64_t) rtcprr->dlsr_frac * 1000000 / 65536 - lsr;
+	int64_t lsr = (int64_t) rtcprr->lsr_frac * 1000000 / 65536
+			+ (int64_t) rtcprr->lsr * 1000000;
+	rtcprr->rtt = rrtime - (int64_t) rtcprr->dlsr * 1000000
+			- (int64_t) rtcprr->dlsr_frac * 1000000 / 65536 - lsr;
 	path_status.at(x)->total_lossrate = rtcprr->totallost;
 
 	printf("rtt = %" PRId64 " \n", rtcprr->rtt);
@@ -1447,8 +1455,7 @@ void rtcprr_list(struct rtcprrbuf * rtcprr, struct rtcprrbuf * buf, int x)
 			rtcprr->lsr_frac, rtcprr->dlsr, rtcprr->dlsr_frac,
 			path_status.at(x)->sender_pc);
 
-	if (path_status.at(x)->rrcount == 0)
-	{
+	if (path_status.at(x)->rrcount == 0) {
 		delta_t = ((double) p_rrtime - (double) st0) / 1000000;
 		rtcprr->Bnd = payload * (1 - rtcprr->lossrate) / delta_t;
 		fprintf(path_par,
@@ -1474,23 +1481,28 @@ void rtcprr_list(struct rtcprrbuf * rtcprr, struct rtcprrbuf * buf, int x)
 		printf("EHSN = %f \n",
 				(double) rtcprr->ehsn - (double) path_status.at(x)->last_ehsn);
 
-		uint32_t dif_pc = path_status.at(x)->sender_pc - path_status.at(x)->lastsender_pc;
+		uint32_t dif_pc = path_status.at(x)->sender_pc
+				- path_status.at(x)->lastsender_pc;
 
-		printf("%d Bnd = %f, sender_oc (%f), lastsender_oc (%f), sender_pc (%f), last_sender_pc (%f), ehsn(%" PRIu32 ") \n",
+		printf(
+				"%d Bnd = %f, sender_oc (%f), lastsender_oc (%f), sender_pc (%f), last_sender_pc (%f), ehsn(%" PRIu32 ") \n",
 				x, rtcprr->Bnd, (double) path_status.at(x)->sender_oc,
 				(double) path_status.at(x)->lastsender_oc,
 				(double) path_status.at(x)->sender_pc,
 				(double) path_status.at(x)->lastsender_pc, rtcprr->ehsn);
 
-		fprintf(log_all, "%d Bnd = %f, sender_oc (%f), lastsender_oc (%f), sender_pc (%f), last_sender_pc (%f), ehsn(%" PRIu32 ") \n",
+		fprintf(log_all,
+				"%d Bnd = %f, sender_oc (%f), lastsender_oc (%f), sender_pc (%f), last_sender_pc (%f), ehsn(%" PRIu32 ") \n",
 				x, rtcprr->Bnd, (double) path_status.at(x)->sender_oc,
 				(double) path_status.at(x)->lastsender_oc,
 				(double) path_status.at(x)->sender_pc,
 				(double) path_status.at(x)->lastsender_pc, rtcprr->ehsn);
 
-		fprintf(log_all, "Totallost = %" PRId32 ", fraclost = %f  \n", (int32_t) rtcprr->totallost, (double) rtcprr->fraclost);
+		fprintf(log_all, "Totallost = %" PRId32 ", fraclost = %f  \n",
+				(int32_t) rtcprr->totallost, (double) rtcprr->fraclost);
 
-		fprintf(path_par, "%5d %10" PRId64 " %9.6f %17f %14f %14f %14f %18" PRId64 " %10f %7" PRIu32 " %7" PRIu32 " %7" PRId32 " %7" PRId32 " %10f\n",
+		fprintf(path_par,
+				"%5d %10" PRId64 " %9.6f %17f %14f %14f %14f %18" PRId64 " %10f %7" PRIu32 " %7" PRIu32 " %7" PRId32 " %7" PRId32 " %10f\n",
 				x, rtcprr->rtt, rtcprr->lossrate, rtcprr->Bnd, payload,
 				(double) path_status.at(x)->sender_oc * 8,
 				(double) path_status.at(x)->lastsender_oc * 8, p_rrtime,
@@ -1526,35 +1538,36 @@ int UDP_Init(int x, char * ip, int localport, char * ipout) {
 	return s;
 }
 
-int sending_rtp(int x, int fds, struct rtppacket * packet) {
+int sending_rtp(int x, int fds, struct rtppacket * packet)
+{
 	struct sockaddr_in udpserver;
 
 	memset((char *) &udpserver, 0, sizeof(udpserver));
 	udpserver.sin_family = PF_INET;
 	udpserver.sin_port = htons(path_status[x]->txport);
 
-	if (inet_aton((char *) path_status[x]->ip, &udpserver.sin_addr) == 0) {
+	if (inet_aton((char *) path_status[x]->ip, &udpserver.sin_addr) == 0)
+	{
 		fprintf(stderr, "inet_aton() failed\n");
 		pthread_exit(NULL);
 	}
 
-	fprintf(log_all, "subflowseq before update = %" PRIu16 " \n",
-			mrheader.at(x)->subflowseq);
-	fprintf(log_all, "ID flow = %" PRIu16 " \n",
-			ntohs(mrheader.at(x)->subflowid));
+	fprintf(log_all, "subflowseq before update = %" PRIu16 " \n", mrheader.at(x)->subflowseq);
+	fprintf(log_all, "ID flow = %" PRIu16 " \n", ntohs(mrheader.at(x)->subflowid));
 	MPRTP_update_subflow(mrheader.at(x), packet->buf, x);
 
 //	int64_t sent_time = now();
-	sent_time = now();
+	sent_time = now()%10000000000;
 	/* We can use sendto in non-blocking way for rescheduling information for another path (using MSG_DONTWAIT flag)
 	 * (Don't forget to check the return value after that!)*/
 
 	int bytes_sent = sendto(fds, packet->buf, packet->packetlen, MSG_DONTWAIT, (struct sockaddr *) &udpserver, sizeof(udpserver));
 //	int64_t spent_time = now();
 
-	printf("bytes_sent = %d, seq = %d \n", bytes_sent, packet->seq);
-	fprintf(log_all, "bytes_sent = %d, seq = %d \n", bytes_sent, packet->seq);
-	if (bytes_sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EMSGSIZE)) {
+//	printf("bytes_sent = %d, seq = %" PRIu64 " \n", bytes_sent, packet->seq);
+	fprintf(log_all, "bytes_sent = %d, seq = %" PRIu64 " \n", bytes_sent, packet->seq);
+	if (bytes_sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EMSGSIZE))
+	{
 		printf("Buffer is overloaded...\n");
 		fprintf(log_all, "Buffer is overloaded...\n");
 		bytes_sent = packet->packetlen;
@@ -1562,8 +1575,8 @@ int sending_rtp(int x, int fds, struct rtppacket * packet) {
 		//	return 0;
 	}
 
-	fprintf(log_rtp, "%4d %6d %10d %10" PRIu32 " %16" PRIu64 " %16" PRIu16 "\n",
-			x, packet->packetlen, packet->seq, packet->dump_ts, sent_time, path_status.at(x)->seq_num - 1);
+	fprintf(log_rtp, "%4d %6d %10" PRIu64 " %10d %10" PRIu32 " %16" PRIu64 " %16" PRIu16 "\n", x, packet->packetlen, packet->seq,
+			packet->frame_number, packet->ts, sent_time, path_status.at(x)->seq_num - 1);
 
 	return bytes_sent;
 }
@@ -1619,10 +1632,8 @@ vector<path_t> path_select(const vector<path_t>& lastpath) {
 
 			for (uint i = 0; i < thread_path.size(); i++) {
 				if (thread_path.at(i) == SENT) {
-					fprintf(log_path, "%d 	%d		%d \n", i, (*it)->seq,
-							(*it)->ts);
-					fprintf(log_all, "%d 	%d		was scheduled ROUND ROBIN \n", i,
-							(*it)->seq);
+					fprintf(log_path, "%d 	%" PRIu64 "		%" PRIu32 " \n", i, (*it)->seq, (*it)->ts);
+					fprintf(log_all, "%d 	%" PRIu64 "		was scheduled ROUND ROBIN \n", i, (*it)->seq);
 				}
 			}
 		} else
@@ -1733,17 +1744,16 @@ int64_t rtcp_interval(int members, int senders, double rtcp_bw, int we_sent,
 	 */
 	//	printf("FB INTERVAL:  %f = (avg_rtcp_size) %d * (no. of members for computation) %d / (rtcp_bw) %f (rtcp_min_time) [%f]\n", t, *avg_rtcp_size, n, rtcp_bw, rtcp_min_time);
 	double probe = t * (drand48() + 0.5);
-	printf("probe fb_interval = %f \n", probe);
+	fprintf(log_all,"probe fb_interval = %f \n", probe);
 
 	return probe * 1000000;
 }
 
 /*Functions for path scheduling */
 
-vector<path_t> path_scheduling(const vector<path_t>& lastpath)
-{
+vector<path_t> path_scheduling(const vector<path_t>& lastpath) {
 	thread_path = lastpath;
-	int ts = -1;
+	int32_t ts = -1;
 
 	/* Initial phase of an algorithm. Send the same packets to all paths until the first RR packets*/
 	if (RTCP_RR_flag == 0)
@@ -1753,12 +1763,12 @@ vector<path_t> path_scheduling(const vector<path_t>& lastpath)
 
 		for (std::list<struct rtppacket *>::iterator it = packets_to_send.begin(); it != packets_to_send.end(); ++it)
 		{
-			int count = std::count((*it)->path.begin(), (*it)->path.end(), INIT);
+			int count = std::count((*it)->path.begin(), (*it)->path.end(),
+					INIT);
 
 			if (count != NUM)
 				continue;
-			else
-			{
+			else {
 				//if it is the first packet of Frame
 				if (ts == -1)
 					ts = (*it)->ts;
@@ -1767,15 +1777,14 @@ vector<path_t> path_scheduling(const vector<path_t>& lastpath)
 			fprintf(log_all, "ts of the frame in scheduling %d \n", ts);
 			if (ts == (*it)->ts)
 			{
-				for (uint i = 0; i < (*it)->path.size(); i++) {
+				for (uint i = 0; i < (*it)->path.size(); i++)
+				{
 					(*it)->path.at(i) = SENT;
 					thread_path.at(i) = SENT;
-					printf("!!!%d 	%d		%d \n", i, (*it)->seq, (*it)->ts);
-					fprintf(log_path, "!!!%d 	%d		%d \n", i, (*it)->seq,
-							(*it)->ts);
+					fprintf(log_path, "!!!%d 	%" PRIu64 "		%" PRIu32 " \n", i, (*it)->seq, (*it)->ts);
 					int64_t t = now() % 10000000000;
-					fprintf(log_all, "%" PRId64 " Scheduled %7d %7d %16d \n", t,
-							i, (*it)->seq, (*it)->ts);
+					fprintf(log_all,
+							"%" PRId64 " Scheduled %7d %7" PRIu64 " %16d \n", t, i, (*it)->seq, (*it)->frame_number);
 				}
 			} else
 				break;
@@ -1783,22 +1792,18 @@ vector<path_t> path_scheduling(const vector<path_t>& lastpath)
 		}
 		if (pthread_mutex_unlock(&list_mutex) != 0)
 			throw std::runtime_error("Mutex unlock failed");
-	}
-	else
-	{
+	} else {
 //		path_smart_select(lastpath);
 		thread_path = path_select(lastpath);
 	}
 	return thread_path;
 }
 
-vector<path_t> packets_path_scheduling(const vector<path_t>& lastpath)
-{
+vector<path_t> packets_path_scheduling(const vector<path_t>& lastpath) {
 	thread_path = lastpath;
 
 	/* Initial phase of an algorithm. Send the same packets to all paths until the first RR packets*/
-	if (RTCP_RR_flag == 0)
-	{
+	if (RTCP_RR_flag == 0) {
 		if (pthread_mutex_lock(&list_mutex) != 0)
 			throw std::runtime_error("Mutex unlock failed");
 
@@ -1809,18 +1814,13 @@ vector<path_t> packets_path_scheduling(const vector<path_t>& lastpath)
 
 			if (count != NUM)
 				continue;
-			else
-			{
-				for (uint i = 0; i < (*it)->path.size(); i++)
-				{
+			else {
+				for (uint i = 0; i < (*it)->path.size(); i++) {
 					(*it)->path.at(i) = SENT;
 					thread_path.at(i) = SENT;
-					printf("!!!%d 	%d		%d \n", i, (*it)->seq, (*it)->ts);
-					fprintf(log_path, "!!!%d 	%d		%d \n", i, (*it)->seq,
-							(*it)->ts);
+					fprintf(log_path, "!!!%d 	%" PRIu64 "		%" PRIu32 " \n", i, (*it)->seq, (*it)->ts);
 					int64_t t = now() % 10000000000;
-					fprintf(log_all, "%" PRId64 " Scheduled %7d %7d %16d \n", t,
-							i, (*it)->seq, (*it)->ts);
+					fprintf(log_all, "%" PRId64 " Scheduled %7d %7" PRIu64 " %16d \n", t, i, (*it)->seq, (*it)->frame_number);
 				}
 				break;
 			}
@@ -1862,10 +1862,8 @@ vector<path_t> packets_path_select(const vector<path_t>& lastpath) {
 
 			for (uint i = 0; i < thread_path.size(); i++) {
 				if (thread_path.at(i) == SENT) {
-					fprintf(log_path, "%d 	%d		%d \n", i, (*it)->seq,
-							(*it)->ts);
-					fprintf(log_all, "%d 	%d		was scheduled ROUND ROBIN \n", i,
-							(*it)->seq);
+					fprintf(log_path, "%d 	%" PRIu64 "		%" PRIu32 " \n", i, (*it)->seq, (*it)->ts);
+					fprintf(log_all, "%d 	%" PRIu64 "		was scheduled ROUND ROBIN \n", i, (*it)->seq);
 				}
 			}
 			break;
@@ -1897,16 +1895,15 @@ vector<std::pair<double, int> > SB_calculation()
 	{
 		if (rtcp_rr_packets.at(i).empty() == 1)
 		{
-			printf("The list %d is empty \n", i);
 			fprintf(log_all, "The list %d is empty \n", i);
-			fprintf(log_all, "%d AvB = %f if the list was empty \n", AvB.at(i).second, AvB.at(i).first);
+			fprintf(log_all, "%d AvB = %f if the list was empty \n",
+					AvB.at(i).second, AvB.at(i).first);
 
-			if (i == NUM - 1)
-			{
+			if (i == NUM - 1) {
 				SB_total.at(i).second = i;
 				SB_total.at(i).first = simple;
-				fprintf(log_all, "SB %f for a path %d if a list is empty \n", SB_total.at(i).first, i);
-				printf("SB %f for a path %d if a list is empty \n", SB_total.at(i).first, i);
+				fprintf(log_all, "SB %f for a path %d if a list is empty \n",
+						SB_total.at(i).first, i);
 
 				if (pthread_mutex_unlock(&rtcprr_mutex) != 0)
 					throw std::runtime_error("Mutex unlock failed");
@@ -1914,70 +1911,66 @@ vector<std::pair<double, int> > SB_calculation()
 				Media_index.first = LAYERS;
 				Media_index.second = FPS;
 
-				printf("Media_index.first = %d \n", Media_index.first);
-				printf("Media_index.second = %d \n", Media_index.second);
-
 				return SB_total;
-			}
-			else
+			} else
 				continue;
 		}
-		else
-		{
+		else {
 			/*Calculate aggregated bandwidth for all paths*/
 			AgB += rtcp_rr_packets.at(i).back()->Bnd;
 
 			//		RTCP_RR_flag = 1;
 
-			if ((rtcp_rr_packets.at(i).back()->lossrate == 0 && rtcp_rr_packets.at(i).back()->Bnd >= AvB.at(i).first) || (rtcp_rr_packets.at(i).back()->lossrate > 0))
-			{
-			//	average_Bnd = 0;
+			if ((rtcp_rr_packets.at(i).back()->lossrate == 0
+					&& rtcp_rr_packets.at(i).back()->Bnd >= AvB.at(i).first)
+					|| (rtcp_rr_packets.at(i).back()->lossrate > 0)) {
+				//	average_Bnd = 0;
 				/*define iterator for list which is an element of vector "rtcp_rr_packets"*/
-				for (std::list<struct rtcprrbuf *>::iterator it = rtcp_rr_packets.at(i).begin(); it != rtcp_rr_packets.at(i).end(); ++it)
+				for (std::list<struct rtcprrbuf *>::iterator it =
+						rtcp_rr_packets.at(i).begin();
+						it != rtcp_rr_packets.at(i).end(); ++it)
 				{
 					/* find the sum of bandwidth values for path i in sliding  window and write this sum to element of pair(path, Average_Bandwidth) */
 					average_Bnd.at(i) += (*it)->Bnd;
-					fprintf(log_all,"%d average bandwidth = %f \n", i, average_Bnd.at(i));
+					fprintf(log_all, "%d average bandwidth = %f \n", i,
+							average_Bnd.at(i));
 				}
 
 				AvB.at(i).second = i;
-				AvB.at(i).first = average_Bnd.at(i) / rtcp_rr_packets.at(i).size();
+				AvB.at(i).first = average_Bnd.at(i)
+						/ rtcp_rr_packets.at(i).size();
 
-				if(rtcp_rr_packets.at(i).back()->lossrate == 0)
+				if (rtcp_rr_packets.at(i).back()->lossrate == 0)
 					simple = AvB.at(i).first;
 				else
 					simple = AvB.at(i).first / 2;
 //**************************************************************************************
-				for (uint k = 0; k < rtcp_rr_packets.size(); k++)
-				{
-					if(rtcp_rr_packets.at(k).empty() == 1)
-					{
+				for (uint k = 0; k < rtcp_rr_packets.size(); k++) {
+					if (rtcp_rr_packets.at(k).empty() == 1) {
 						AvB.at(k).first = simple;
 						AvB.at(k).second = k;
 
-						if (k == NUM - 1)
-						{
+						if (k == NUM - 1) {
 							SB_total.at(k).second = i;
 							SB_total.at(k).first = simple;
-							fprintf(log_all, "SB %f for a path %d if a list is empty ", SB_total.at(k).first, k);
+							fprintf(log_all,
+									"SB %f for a path %d if a list is empty ",
+									SB_total.at(k).first, k);
 
 							if (pthread_mutex_unlock(&rtcprr_mutex) != 0)
 								throw std::runtime_error("Mutex unlock failed");
 
 							return SB_total;
-						}
-						else
+						} else
 							continue;
 					}
 				}
 //**************************************************************************************
 				fprintf(log_all, "AvB before sorting \n");
 				fprintf(log_all, "SIMPLE = %f \n", simple);
-				printf("AvB before sorting \n");
-				for (uint i = 0; i < AvB.size(); i++)
-				{
-					fprintf(log_all, "%d AvB = %f \n", AvB.at(i).second, AvB.at(i).first);
-					printf("%d AvB = %f \n", AvB.at(i).second, AvB.at(i).first);
+				for (uint i = 0; i < AvB.size(); i++) {
+					fprintf(log_all, "%d AvB = %f \n", AvB.at(i).second,
+							AvB.at(i).first);
 				}
 			}
 		}
@@ -1987,7 +1980,6 @@ vector<std::pair<double, int> > SB_calculation()
 		throw std::runtime_error("Mutex unlock failed");
 
 	fprintf(log_all, "Aggregated Bandwidth = %f \n", AgB);
-	printf("Aggregated Bandwidth = %f \n", AgB);
 
 	SAvB.assign(NUM, std::make_pair(0.0, 0));
 	SAvB = AvB;
@@ -1995,107 +1987,96 @@ vector<std::pair<double, int> > SB_calculation()
 	/*Sort AverageBandwidth values from min to max*/
 	std::sort(SAvB.begin(), SAvB.end());
 
-	printf("AvB after sorting \n");
 	fprintf(log_all, "AvB after sorting \n");
-	for (uint i = 0; i < SAvB.size(); i++)
-	{
-		fprintf(log_all, "%d SAvB = %f \n", SAvB.at(i).second, SAvB.at(i).first);
-		printf("%d SAvB = %f \n", SAvB.at(i).second, SAvB.at(i).first);
+	for (uint i = 0; i < SAvB.size(); i++) {
+		fprintf(log_all, "%d SAvB = %f \n", SAvB.at(i).second,
+				SAvB.at(i).first);
 	}
 
 	/*Sum all values of Average Bandwidth for all paths*/
-	for (uint j = 0; j < AvB.size(); j++)
-	{
+	for (uint j = 0; j < AvB.size(); j++) {
 		AvB_total += AvB.at(j).first;
 	}
-	printf("AvB_total = %f \n", AvB_total);
 	fprintf(log_all, "AvB_total = %f \n", AvB_total);
 
-	for (uint j = 0; j < AvB.size(); j++)
-	{
+	for (uint j = 0; j < AvB.size(); j++) {
 		AvB_total += AvB.at(j).first;
 	}
-	printf("AvB_total = %f \n", AvB_total);
 	fprintf(log_all, "AvB_total = %f \n", AvB_total);
 
 	//////////////////////////////////////////////////////////////////////////////////////////
 
-	for(uint j = 0; j < Media_bitrate.size(); j++)
-	{
-		for(uint i = 0; i < Media_bitrate.at(i).size(); i++)
+	for (uint j = 0; j < Media_bitrate.size(); j++) {
+		for (uint i = 0; i < Media_bitrate.at(i).size(); i++)
 		{
-			printf("Media bit rate in SB_calculation %f \n", Media_bitrate.at(j).at(i));
-			if (AgB < Media_bitrate.at(j).at(i))
-			{
-				double MRate1 = Media_bitrate.at(j-1).at(i);
-				double MRate2 = Media_bitrate.at(j).at(i-1);
+			if (AgB < Media_bitrate.at(j).at(i)) {
+				double MRate1 = Media_bitrate.at(j - 1).at(i);
+				double MRate2 = Media_bitrate.at(j).at(i - 1);
 
-				if(AgB < MRate1)
-				{
+				if (AgB < MRate1) {
 					Media_Rate = MRate1;
 
 					if (pthread_mutex_lock(&media_mutex) != 0)
 						throw std::runtime_error("Mutex lock failed");
 
-					Media_index.first = j-1;
+					Media_index.first = j - 1;
 					Media_index.second = i;
 
 					if (pthread_mutex_unlock(&media_mutex) != 0)
 						throw std::runtime_error("Mutex unlock failed");
 				}
-				if(AgB < MRate1)
-				{
+				if (AgB < MRate1) {
 					Media_Rate = MRate2;
 
 					if (pthread_mutex_lock(&media_mutex) != 0)
 						throw std::runtime_error("Mutex lock failed");
 
 					Media_index.first = j;
-					Media_index.second = i-1;
+					Media_index.second = i - 1;
 
 					if (pthread_mutex_unlock(&media_mutex) != 0)
 						throw std::runtime_error("Mutex unlock failed");
 
 				}
-				printf("AgB = %f MRate1 = %f MRate2 = %f \n", AgB, MRate1, MRate2);
+				fprintf(log_all,"AgB = %f MRate1 = %f MRate2 = %f \n", AgB, MRate1,
+						MRate2);
 			}
 		}
 	}
 
-	for (uint j = 0; j < SAvB.size(); j++)
-	{
-		printf("Number of element SB_total %d \n", SAvB.at(j).second);
-		printf("AvB.at(j).first (%f) / AvB_total (%f)  = %f\n",	SAvB.at(j).first, AvB_total, SAvB.at(j).first / AvB_total);
-		printf("Difference between MediaRate and sum_of_SB %f \n", (double) Media_Rate - sum_of_SB);
+	for (uint j = 0; j < SAvB.size(); j++) {
+		fprintf(log_all,"Number of element SB_total %d \n", SAvB.at(j).second);
+		fprintf(log_all,"AvB.at(j).first (%f) / AvB_total (%f)  = %f\n",
+				SAvB.at(j).first, AvB_total, SAvB.at(j).first / AvB_total);
+		fprintf(log_all,"Difference between MediaRate and sum_of_SB %f \n",
+				(double) Media_Rate - sum_of_SB);
 
-		SB_total.at(j).first = (SAvB.at(j).first / AvB_total) * ((double) Media_Rate - sum_of_SB) * alpha;
+		SB_total.at(j).first = (SAvB.at(j).first / AvB_total)
+				* ((double) Media_Rate - sum_of_SB) * alpha;
 		SB_total.at(j).second = SAvB.at(j).second;
 
-		//SB_total.at(SAvB.at(j).second) = (SAvB.at(j).first / AvB_total) * ((double)Media_Rate - sum_of_SB) * alpha;
-
-		//		sum_of_SB = std::accumulate(SB_total.begin(),SB_total.end(), SB_total.at(AvB.at(j).second));
-
-		fprintf(log_all, "For path %d SB = %f without extra \n",  SB_total.at(j).second, SB_total.at(j).first);
-		printf("For path %d SB = %f without extra \n", SB_total.at(j).second, SB_total.at(j).first);
-
-		//	sum_of_SB = std::accumulate(SB_total.begin(),SB_total.end(),0);
+		fprintf(log_all, "For path %d SB = %f without extra \n",
+				SB_total.at(j).second, SB_total.at(j).first);
 	}
 
 	for (uint j = 0; j < SAvB.size(); j++)
 	{
-		printf("Number of element SB_total %d \n", SAvB.at(j).second);
-		printf("AvB.at(j).first (%f) / AvB_total (%f)  = %f\n",	SAvB.at(j).first, AvB_total, SAvB.at(j).first / AvB_total);
-		printf("Difference between MediaRate and sum_of_SB %f \n", (double) Media_Rate - sum_of_SB);
+		fprintf(log_all,"Number of element SB_total %d \n", SAvB.at(j).second);
+		fprintf(log_all,"AvB.at(j).first (%f) / AvB_total (%f)  = %f\n",
+				SAvB.at(j).first, AvB_total, SAvB.at(j).first / AvB_total);
+		fprintf(log_all,"Difference between MediaRate and sum_of_SB %f \n",
+				(double) Media_Rate - sum_of_SB);
 
-		SB_total.at(j).first = (SAvB.at(j).first / AvB_total) * ((double) Media_Rate - sum_of_SB) * alpha;
+		SB_total.at(j).first = (SAvB.at(j).first / AvB_total)
+				* ((double) Media_Rate - sum_of_SB) * alpha;
 		SB_total.at(j).second = SAvB.at(j).second;
 
 		//SB_total.at(SAvB.at(j).second) = (SAvB.at(j).first / AvB_total) * ((double)Media_Rate - sum_of_SB) * alpha;
 
 		//		sum_of_SB = std::accumulate(SB_total.begin(),SB_total.end(), SB_total.at(AvB.at(j).second));
 
-		fprintf(log_all, "For path %d SB = %f without extra \n",  SB_total.at(j).second, SB_total.at(j).first);
-		printf("For path %d SB = %f without extra \n", SB_total.at(j).second, SB_total.at(j).first);
+		fprintf(log_all, "For path %d SB = %f without extra \n",
+				SB_total.at(j).second, SB_total.at(j).first);
 
 		//	sum_of_SB = std::accumulate(SB_total.begin(),SB_total.end(),0);
 		for (uint i = 0; i < SB_total.size(); i++)
@@ -2103,48 +2084,44 @@ vector<std::pair<double, int> > SB_calculation()
 
 		int path_num = 0;
 		/* If Sending Bit rate is smaller that Video Rate */
-		while (1)
-		{
+		while (1) {
 			fprintf(log_all, "WHILE!!!!!!\n");
-			for (uint i = 0; i < rtcp_rr_packets.size(); i++)
-			{
+			for (uint i = 0; i < rtcp_rr_packets.size(); i++) {
 				fprintf(log_all, "ExTRA begin FOR loop %d\n", i);
 
-				if (rtcp_rr_packets.at(i).back()->lossrate == 0)
-		{
-			path_num++;
-			sum_of_SB += Add_SB;
-			Add_SB = (SAvB.at(i).first / Media_Rate) * (Media_Rate - sum_of_SB);
-			SB_total.at(i).first += Add_SB;
+				if (rtcp_rr_packets.at(i).back()->lossrate == 0) {
+					path_num++;
+					sum_of_SB += Add_SB;
+					Add_SB = (SAvB.at(i).first / Media_Rate)
+							* (Media_Rate - sum_of_SB);
+					SB_total.at(i).first += Add_SB;
 
-			fprintf(log_all, "sum_of_SB = %f \n", sum_of_SB);
-			fprintf(log_all, "For path %d SB = %f with extra \n", SAvB.at(i).second, SB_total.at(i).first);
-			printf("For path %d SB = %f with extra \n", SAvB.at(i).second, 	SB_total.at(i).first);
-		}
+					fprintf(log_all, "sum_of_SB = %f \n", sum_of_SB);
+					fprintf(log_all, "For path %d SB = %f with extra \n",
+							SAvB.at(i).second, SB_total.at(i).first);
+				}
 			}
 			/*If we have congestion on all paths */
 
 			fprintf(log_all, "sum_of_SB = %f \n", sum_of_SB);
-			printf("sum_of_SB = %f \n", sum_of_SB);
 
 			/*Since I don't know why it is impossible escape from a loop even if values of sum_of_SB and Media_Rate are equal, I decided to add +0.00001 to sum_of_SB*/
 			if (sum_of_SB >= Media_Rate - 0.00001)
 				break;
-			else
-			{
-				if(path_num == 0)
-				{
-					for (uint i = 0; i < rtcp_rr_packets.size(); i++)
-					{
-						if(rtcp_rr_packets.at(i).back()->lossrate > 0)
-						{
+			else {
+				if (path_num == 0) {
+					for (uint i = 0; i < rtcp_rr_packets.size(); i++) {
+						if (rtcp_rr_packets.at(i).back()->lossrate > 0) {
 							sum_of_SB += Add_SB;
-							Add_SB = (SAvB.at(i).first / Media_Rate) * (Media_Rate - sum_of_SB);
+							Add_SB = (SAvB.at(i).first / Media_Rate)
+									* (Media_Rate - sum_of_SB);
 							SB_total.at(i).first += Add_SB;
 
-							fprintf(log_all, "sum_of_SB in congestion = %f \n", sum_of_SB);
-							fprintf(log_all, "For path %d SB = %f with extra in congestion \n", SAvB.at(i).second, SB_total.at(i).first);
-							printf("For path %d SB = %f with extra in congestion \n", SAvB.at(i).second, 	SB_total.at(i).first);
+							fprintf(log_all, "sum_of_SB in congestion = %f \n",
+									sum_of_SB);
+							fprintf(log_all,
+									"For path %d SB = %f with extra in congestion \n",
+									SAvB.at(i).second, SB_total.at(i).first);
 						}
 					}
 				}
@@ -2159,29 +2136,26 @@ int create_packet()
 	uint16_t seq_fr = 0;
 
 	if (pthread_mutex_lock(&frame_mutex) != 0)
-			throw std::runtime_error("Mutex lock failed");
+		throw std::runtime_error("Mutex lock failed");
 
 	for (std::list<struct trace *>::iterator it = frame_list.begin(); it != frame_list.end(); ++it)
 	{
-		if((*it)->location == NONALLOC)
+		if ((*it)->location == NONALLOC)
 		{
-			std::vector<std::vector<int> >::iterator row;
-			std::vector<int>::iterator col;
 			int payload = 0;
 
-			for(int i = 0; i < Media_index.first; i++)
-				payload += (*it)->size.at(i).at(Media_index.second-1);
+			for (int i = 0; i < Media_index.first; i++)
+				payload += (*it)->size.at(i).at(Media_index.second - 1);
 
-
-			double q = payload/(double)MTU;
+			double q = payload / (double) (MTU-MPRTP_HEADER);
 			int quantity = 0;
-			quantity = (int)ceil(q);
+			quantity = (int) ceil(q);
 
-			for(int i = 0; i != quantity; i++)
+			for (int i = 0; i != quantity; i++)
 			{
 				/*Don't forget to consider MPRTP header in 12 bytes!*/
 
-				if(payload <= MTU - 12)
+				if (payload <= (MTU - MPRTP_HEADER))
 				{
 					struct rtppacket *packet = NULL;
 
@@ -2190,14 +2164,15 @@ int create_packet()
 
 					packet->payloadlen = payload;
 					packet->packetlen = packet->payloadlen + 12;
-					packet->ts = (*it)->time;
+					packet->ts = (*it)->time*1000000;
 					packet->seq_fr = i;
 					packet->seq = seq;
-					seq_fr ++;
-					seq ++;
+					packet->frame_number = (*it)->number;
+					seq_fr++;
+					seq++;
 
-					fprintf(log_all,"1 Frame #%d packet_fr#%d packet#%" PRIu16 " payload %d \n", (*it)->number, packet->seq_fr,
-							packet->seq, packet->payloadlen);
+					fprintf(log_all, "1 Frame #%d packet_fr#%d packet#%" PRIu64 " payload %d \n", (*it)->number, packet->seq_fr, packet->seq,
+							packet->payloadlen);
 
 					insert_data_to_list(packet);
 				}
@@ -2210,23 +2185,27 @@ int create_packet()
 
 					packet->payloadlen = MTU;
 					packet->packetlen = packet->payloadlen + 12;
-					packet->ts = (*it)->time;
+					packet->ts = (*it)->time*1000000;
 					packet->seq_fr = i;
 					packet->seq = seq;
-					seq ++;
-					seq_fr ++;
+					packet->frame_number = (*it)->number;
+					seq++;
+					seq_fr++;
 
-					fprintf(log_all,"2 Frame #%d packet_fr#%d packet#%" PRIu16 " payload %d \n", (*it)->number, packet->seq_fr,
-							packet->seq, packet->payloadlen);
+					fprintf(log_all, "2 Frame #%d packet_fr#%d packet#%" PRIu64 " payload %d \n",
+							(*it)->number, packet->seq_fr, packet->seq,	packet->payloadlen);
 
 					insert_data_to_list(packet);
 
-					payload = payload-MTU;
+					payload = payload - MTU;
 				}
 
 				if (seq_fr == quantity)
 				{
 					(*it)->location = ALLOC;
+					int64_t t_finish = now();
+
+					fprintf(log_quantity, "%d    %8" PRIu16 " %10" PRId64 " %10" PRId64 "\n", (*it)->number, seq_fr, t_finish-st0, (int64_t)((*it)->time*1000000));
 
 					if (pthread_mutex_unlock(&frame_mutex) != 0)
 						throw std::runtime_error("Mutex unlock failed");
@@ -2241,14 +2220,12 @@ int create_packet()
 	if (pthread_mutex_unlock(&frame_mutex) != 0)
 		throw std::runtime_error("Mutex unlock failed");
 
-return 0;
+	return 0;
 }
 
-int open_bitrate_file()
-{
+int open_bitrate_file() {
 	FILE *fr = fopen("/home/ekaterina/experiment/bitrate", "r");
-	if (fr == NULL)
-	{
+	if (fr == NULL) {
 		printf("Read called without fr opening file\n");
 		printf("While reading fr file : %d, %s\n", errno, strerror(errno));
 		return 0;
@@ -2257,37 +2234,36 @@ int open_bitrate_file()
 	 * put these values to vector Media_bitrate where strings reflects quality scalability
 	 * and colomns reflects temporal scalability */
 
-	for(uint j = 0; j < Media_bitrate.size(); j ++)
-	{
-		for(uint i = 0; i < Media_bitrate.at(i).size(); i ++)
-		{
-			if(fscanf(fr, "%lf", &Media_bitrate.at(j).at(i)) == EOF)
+	for (uint j = 0; j < Media_bitrate.size(); j++) {
+		for (uint i = 0; i < Media_bitrate.at(i).size(); i++) {
+			if (fscanf(fr, "%lf", &Media_bitrate.at(j).at(i)) == EOF)
 				break;
 		}
 	}
 	if (fclose(fr) == 0)
 		printf("Bitrate file was successfully closed \n");
 	else
-		printf("Error during the procedure of closing bitrate file: %d \n", errno);
+		printf("Error during the procedure of closing bitrate file: %d \n",
+				errno);
 	return 1;
 }
 
 /*FILE open_tracefile (char *filename)
-{
-	FILE *tr = fopen("/home/ekaterina/experiment/tracefile", "r");
-	if (tr == NULL)
-	{
-		printf("Read called without fd opening file\n");
-		printf("While reading fd file : %d, %s\n", errno, strerror(errno));
-		fclose(tr);
-	//	return NULL;
-	}
-	else
-	{
-		printf("tr = %d \n", tr);
-		return *tr;
-	}
-}*/
+ {
+ FILE *tr = fopen("/home/ekaterina/experiment/tracefile", "r");
+ if (tr == NULL)
+ {
+ printf("Read called without fd opening file\n");
+ printf("While reading fd file : %d, %s\n", errno, strerror(errno));
+ fclose(tr);
+ //	return NULL;
+ }
+ else
+ {
+ printf("tr = %d \n", tr);
+ return *tr;
+ }
+ }*/
 
 vector<path_t> path_SB_scheduling(std::vector<std::pair<double, int> > SB_total)
 {
@@ -2300,6 +2276,8 @@ vector<path_t> path_SB_scheduling(std::vector<std::pair<double, int> > SB_total)
 		if (pthread_mutex_lock(&list_mutex) != 0)
 			throw std::runtime_error("Mutex unlock failed");
 
+		fprintf(log_all, "size of packets_to_send in path scheduling = %" PRId64 " \n", packets_to_send.size());
+
 		for (std::list<struct rtppacket *>::iterator it = packets_to_send.begin(); it != packets_to_send.end(); ++it)
 		{
 			int count = std::count((*it)->path.begin(), (*it)->path.end(), INIT);
@@ -2308,16 +2286,22 @@ vector<path_t> path_SB_scheduling(std::vector<std::pair<double, int> > SB_total)
 				continue;
 			else
 			{
-				for (uint i = 0; i < (*it)->path.size(); i++)
+				std::list<struct rtppacket *>::iterator itor = packets_to_send.begin();
+
+				if((*it)->ts == 0 || (*it)->ts == (*itor)->ts)
 				{
-					(*it)->path.at(i) = SENT;
-					thread_path.at(i) = SENT;
-					printf("!!!%d 	%d		%d \n", i, (*it)->seq, (*it)->ts);
-					fprintf(log_path, "!!!%d 	%d		%d \n", i, (*it)->seq, (*it)->ts);
-					int64_t t = now() % 10000000000;
-					fprintf(log_all, "%" PRId64 " Scheduled %7d %7d %16d \n", t, i, (*it)->seq, (*it)->ts);
+					for (uint i = 0; i < (*it)->path.size(); i++)
+					{
+						(*it)->path.at(i) = SENT;
+						thread_path.at(i) = SENT;
+						fprintf(log_path, "!!!%d 	%" PRIu64 "	 %d	%d \n", i, (*it)->seq, (*it)->frame_number, (*it)->ts);
+						int64_t t = now() % 10000000000;
+
+						fprintf(log_all, "%" PRId64 " Scheduled %7d %7" PRIu64 " %7d \n", t, i, (*it)->seq, (*it)->frame_number);
+					}
 				}
-				break;
+				else
+					break;
 			}
 		}
 		if (pthread_mutex_unlock(&list_mutex) != 0)
@@ -2328,46 +2312,44 @@ vector<path_t> path_SB_scheduling(std::vector<std::pair<double, int> > SB_total)
 		if (pthread_mutex_lock(&list_mutex) != 0)
 			throw std::runtime_error("Mutex unlock failed");
 
-		for (std::list<struct rtppacket *>::iterator it = packets_to_send.begin(); it != packets_to_send.end(); ++it)
-		{
-			int count = std::count((*it)->path.begin(), (*it)->path.end(),	INIT);
+		for (std::list<struct rtppacket *>::iterator it =
+				packets_to_send.begin(); it != packets_to_send.end(); ++it) {
+			int count = std::count((*it)->path.begin(), (*it)->path.end(),
+					INIT);
 
 			/*if packet in a list is already scheduled*/
 			if (count != NUM)
 				continue;
 			/*if packet in a list isn't scheduled yet*/
-			else
-			{
+			else {
 				tc = now(); // take a current time
 
-				for (uint i = 0; i < SB_total.size(); i++)
-				{
+				for (uint i = 0; i < SB_total.size(); i++) {
 					delta_t = (*it)->packetlen / SB_total.at(i).first * 1000000;
-					fprintf(log_all, "packetlen = %d #%d \n", (*it)->packetlen,	(*it)->seq);
-					fprintf(log_all, "%d Sending Bit rate = %f \n", i, SB_total.at(i).first);
-					fprintf(log_all, "%d delta_t in Token Bucket = %f \n", i, delta_t);
-					fprintf(log_all, "%d tc - tp = %" PRId64 "\n", i, tc - tp.at(i));
+					fprintf(log_all, "packetlen = %d #%" PRIu64 " \n", (*it)->packetlen, (*it)->seq);
+					fprintf(log_all, "%d Sending Bit rate = %f \n", i,
+							SB_total.at(i).first);
+					fprintf(log_all, "%d delta_t in Token Bucket = %f \n", i,
+							delta_t);
+					fprintf(log_all, "%d tc - tp = %" PRId64 "\n", i,
+							tc - tp.at(i));
 
-					if (tc - tp.at(i) > delta_t)
-					{
+					if (tc - tp.at(i) > delta_t) {
 						for (uint j = 0; j < (*it)->path.size(); j++)
 							(*it)->path.at(j) = NSENT;
 
 						(*it)->path.at(SB_total.at(i).second) = SENT;
 
-						printf("Transmit packet to path %d \n",	i);
-						fprintf(log_all, "Transmit packet #%d to path %d \n", (*it)->seq, i);
+						fprintf(log_all, "Transmit packet #%" PRIu64 " to path %d \n", (*it)->seq, i);
 						tp.at(i) = tc;
 						thread_path = (*it)->path;
-						printf("%d 	%d		%d \n", i, (*it)->seq, (*it)->ts);
-						fprintf(log_path, "%d 	%d		%d \n", i, (*it)->seq, (*it)->ts);
+						fprintf(log_path, "%d 	%" PRIu64 "	%d	%d \n", i, (*it)->seq, (*it)->frame_number, (*it)->ts);
 
 						if (pthread_mutex_unlock(&list_mutex) != 0)
 							throw std::runtime_error("Mutex unlock failed");
 
 						return thread_path;
-					}
-					else
+					} else
 						continue;
 				}
 			}
