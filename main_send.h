@@ -73,7 +73,7 @@ public:
 	int payloadlen;
 	int packetlen;
 	int32_t ts;				/*timestamp in RTP file*/
-	uint64_t seq;		/* Sequance number in video sequence*/
+	uint16_t seq;		/* Sequance number in video sequence*/
 	int seq_fr;	/* Sequance number in a frame*/
 	int frame_number;
 	char buf[1600];
