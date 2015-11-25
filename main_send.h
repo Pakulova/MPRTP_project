@@ -35,12 +35,13 @@ void *recv_rtcp(void *arg);
 void *send_rtcp(void *arg);
 int openfile(char *filemane);
 FILE open_tracefile (char *filename);
-int open_bitrate_file();
+void open_bitrate_file();
 int readpacket(struct rtppacket *packet,int fd);
 int UDP_Init(int x, char * ip, int localport, char * ipout);
 void SetnonBlocking(int s);
 int readtrace(char *filename);
 int create_packet();
+int media_index_calculation(double Aggregated_bandwidth);
 
 vector <path_t> path_select (const vector <path_t>& lastpath);
 vector <path_t> path_scheduling (const vector <path_t>& lastpath);
