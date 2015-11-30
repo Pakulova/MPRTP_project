@@ -37,7 +37,7 @@ int openfile(char *filemane);
 FILE open_tracefile (char *filename);
 void open_bitrate_file();
 int readpacket(struct rtppacket *packet,int fd);
-int UDP_Init(int x, char * ip, int localport, char * ipout);
+int UDP_Init(int x, int localport, char * ipout);
 void SetnonBlocking(int s);
 int readtrace(char *filename);
 int create_packet();
@@ -59,7 +59,7 @@ void MPRTP_Init_subflow(struct mprtphead * mrheader, uint16_t x);
 void rtcprr_list(struct rtcprrbuf * rtcprr ,struct rtcprrbuf *rtcpbuf, int path);
 
 int sending_rtp (int x, int fds, struct rtppacket * packet);
-void waiting(const int64_t wake);
+void waiting(int64_t wake);
 int64_t now();
 int getrtcpsr (struct rtcpsrbuf * rtcpsr, int64_t time, int path);
 
@@ -96,6 +96,18 @@ public:
     std::vector <std::vector<double> > PSNRY;
     std::vector <std::vector<double> > PSNRU;
     std::vector <std::vector<double> > PSNRV;
+};
+
+struct time
+{
+public:
+	time(): wake(0), st0(0), before_wait(0), after_wait(0),before_SB(0),after_SB(0){}
+	int64_t wake;
+	int64_t st0;
+	int64_t before_wait;
+	int64_t after_wait;
+	int64_t before_SB;
+	int64_t after_SB;
 };
 
 
@@ -171,12 +183,12 @@ struct mprtphead
 struct rtcpsrbuf
 {
 //	pthread_mutex_t rtcpsr_mutex;
-	uint8_t b1;
-	uint8_t b2;
-	uint16_t len;
-	uint32_t ssrc;
-	uint32_t ntpts;
-	uint32_t ntpts_frac;
+	uint8_t b1;					//1
+	uint8_t b2;					//1
+	uint16_t len;				//2
+	uint32_t ssrc;				//4
+	uint32_t ntpts;			    //4
+	uint32_t ntpts_frac;	    //4
 	uint32_t rtpts;
 	uint32_t sender_pc; /*packet count*/
 	uint32_t sender_oc; /*octet count*/
