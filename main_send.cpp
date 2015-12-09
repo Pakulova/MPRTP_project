@@ -120,8 +120,6 @@ int main(int argc, char* argv[])
 	char iptx[20] = { IPTX };
 	int txport = 4402;
 	int64_t time1 = 0;
-	int64_t time_before_SB = 0;
-	int64_t time_after_SB = 0;
 
 	vector<int> counter(NUM, 0);
 	std::vector<std::pair<double, int> > SB_total(NUM, std::make_pair(0.0, 0));
@@ -162,7 +160,7 @@ int main(int argc, char* argv[])
 	if (log_rtp == NULL)
 		printf("Impossible to open or create txt log file for RTP!!! \n");
 	else
-		fprintf(log_rtp, "%4s %6s %10s %10s %10s %16s %16s \n", "Path", "Length", "Seq_No", "Frame_No", "ts", "send_time", "ideal_send_time");
+		fprintf(log_rtp, "%4s %6s %10s %10s %10s %6s %16s %16s %16s %16s \n", "Path", "Length", "Payload", "Seq_No", "Frame_No", "ts", "send_time", "ideal_send_time", "spent_time", "Sublowseq");
 
 	log_quantity = fopen("/home/ekaterina/experiment/log_qu", "w");
 	if (log_quantity == NULL)
@@ -530,6 +528,22 @@ int main(int argc, char* argv[])
 		}
 
 	}
+	if (term_flag == 1)
+	{
+		for (int i = 0; i < n; i++)
+		{
+			printf("Total number of packet sent to path %d = %d \n", i, path_status.at(i)->sender_pc);
+			printf("Total lost for path %d = %f \n", i, path_status.at(i)->total_lossrate);
+			fprintf(log_all,"Total number of packet sent to path %d = %d \n", i,
+					path_status.at(i)->sender_pc);
+			fprintf(log_all,"Total lost for path %d = %f \n", i, path_status.at(i)->total_lossrate);
+		}
+
+		int64_t t_finish = now();
+		printf("Total_time = %" PRId64 " \n", t_finish-st0);
+		fprintf(log_all,"Total_time = %" PRId64 " \n", t_finish-st0);
+
+
 	if (fclose(log_rtp) == 0)
 		printf("Log_rtp file was successfully closed \n");
 	else
@@ -555,25 +569,8 @@ int main(int argc, char* argv[])
 	if (fclose(log_all) == 0)
 		printf("Log_all file was successfully closed \n");
 	else
-		printf("Error during the procedure of closing log_all file: %d \n",
-		errno);
+		printf("Error during the procedure of closing log_all file: %d \n", errno);
 
-	if (term_flag == 1)
-	{
-		for (int i = 0; i < n; i++) {
-			printf("Total number of packet sent to path %d = %d \n", i,
-					path_status.at(i)->sender_pc);
-			printf("Total lost for path %d = %f \n", i,
-					path_status.at(i)->total_lossrate);
-			fprintf(log_all,"Total number of packet sent to path %d = %d \n", i,
-					path_status.at(i)->sender_pc);
-			fprintf(log_all,"Total lost for path %d = %f \n", i,
-					path_status.at(i)->total_lossrate);
-		}
-
-		int64_t t_finish = now();
-		printf("Total_time = %" PRId64 " \n", t_finish-st0);
-		fprintf(log_all,"Total_time = %" PRId64 " \n", t_finish-st0);
 
 #ifdef SMART
 
@@ -683,10 +680,9 @@ void MPRTP_update_subflow(struct mprtphead * mrheader, char * buf, int x)
 {
 	path_status.at(x)->seq_num = ntohs(mrheader->subflowseq);
 
-	//	y = ntohs(mrheader->subflowseq);
 	/*set x bit*/
 	buf[0] = buf[0] | EXT_MASK;
-//	fprintf(log_all, "MPRTP Subflowseq for path %d = %" PRIu16 "\n", x, path_status.at(x)->seq_num);
+	fprintf(log_all, "MPRTP Subflowseq for path %d = %" PRIu16 "\n", x, path_status.at(x)->seq_num);
 	memcpy(buf + 12, mrheader, sizeof(struct mprtphead));
 	path_status.at(x)->seq_num++;
 	mrheader->subflowseq = htons(path_status.at(x)->seq_num);
@@ -1156,14 +1152,14 @@ void* rtp_send(void *arg)
 	return NULL;
 }
 
-void MPRTP_Init_subflow(struct mprtphead * mrheader, uint16_t x) {
+void MPRTP_Init_subflow(struct mprtphead * mrheader, uint16_t x)
+{
 	mrheader->prospec = htons(RTP_H_EXTID);
 	mrheader->wordlen = htons(2);
 	mrheader->hextid = htons(MPR_H_EXTID);
 	mrheader->len = htons(6);
-//	mrheader->mprtype = htons(MPR_TYPE_SUBFLOW);
 	mrheader->subflowid = htons(x);
-	mrheader->subflowseq = htons(1);
+	mrheader->subflowseq = htons(0);
 	mrheader->mprtype = htons(MPR_TYPE_SUBFLOW);
 }
 
@@ -1308,7 +1304,6 @@ void* recv_rtcp(void *arg) {
 		}
 		else
 		{
-			//	rtcpbuf = new char[BUFLEN];
 			if (FD_ISSET(sock, &rset))
 			{
 				reciever_size = sizeof reciever;
@@ -1422,7 +1417,7 @@ void rtcprr_list(struct rtcprrbuf * rtcprr, struct rtcprrbuf * buf, int x)
 
 	int64_t lsr = (int64_t) rtcprr->lsr_frac * 1000000 / 65536 + (int64_t) rtcprr->lsr * 1000000;
 	rtcprr->rtt = rrtime - (int64_t) rtcprr->dlsr * 1000000 - (int64_t) rtcprr->dlsr_frac * 1000000 / 65536 - lsr;
-	path_status.at(x)->total_lossrate = rtcprr->totallost;
+	path_status.at(x)->total_lossrate = rtcprr->totallost-1;
 
 //	fprintf(log_all,"rtt = %" PRId64 " \n", rtcprr->rtt);
 
@@ -1461,7 +1456,7 @@ void rtcprr_list(struct rtcprrbuf * rtcprr, struct rtcprrbuf * buf, int x)
 		rtcprr->Bnd = payload * (1 - rtcprr->lossrate) / delta_t;
 		uint32_t dif_pc = path_status.at(x)->sender_pc - path_status.at(x)->lastsender_pc;
 
-/*		fprintf(log_all,
+		fprintf(log_all,
 				"%d Bnd = %f, sender_oc (%f), lastsender_oc (%f), sender_pc (%f), last_sender_pc (%f), ehsn(%" PRIu32 ") \n",
 				x, rtcprr->Bnd, (double) path_status.at(x)->sender_oc,
 				(double) path_status.at(x)->lastsender_oc,
@@ -1470,7 +1465,7 @@ void rtcprr_list(struct rtcprrbuf * rtcprr, struct rtcprrbuf * buf, int x)
 
 		fprintf(log_all, "Totallost = %" PRId32 ", fraclost = %f  \n",
 				(int32_t) rtcprr->totallost, (double) rtcprr->fraclost);
-*/
+
 		fprintf(path_par,
 				"%5d %10" PRId64 " %9.6f %17f %14f %14f %14f %18" PRId64 " %10f %7" PRIu32 " %7" PRIu32 " %7" PRId32 " %7" PRId32 " %10f\n",
 				x, rtcprr->rtt, rtcprr->lossrate, rtcprr->Bnd, payload,
@@ -1514,6 +1509,7 @@ int UDP_Init(int x, int localport, char * ipout)
 int sending_rtp(int x, int fds, struct rtppacket * packet)
 {
 	struct sockaddr_in udpserver;
+	int bytes_sent = 0;
 
 	memset((char *) &udpserver, 0, sizeof(udpserver));
 	udpserver.sin_family = PF_INET;
@@ -1525,33 +1521,53 @@ int sending_rtp(int x, int fds, struct rtppacket * packet)
 		pthread_exit(NULL);
 	}
 
-/*	fprintf(log_all, "subflowseq before update = %" PRIu16 " \n",ntohs(mrheader.at(x)->subflowseq));
-	fprintf(log_all, "ID flow = %" PRIu16 " \n", ntohs(mrheader.at(x)->subflowid));
-*/	MPRTP_update_subflow(mrheader.at(x), packet->buf, x);
+	MPRTP_update_subflow(mrheader.at(x), packet->buf, x);
 
 	sent_time = now();
 
-	/* We can use sendto in non-blocking way for rescheduling information for another path (using MSG_DONTWAIT flag)
-	 * (Don't forget to check the return value after that!)*/
+	fd_set rset;
+	FD_ZERO(&rset);
+	FD_SET(fds, &rset);
 
-	int bytes_sent = sendto(fds, packet->buf, packet->packetlen, MSG_DONTWAIT, (struct sockaddr *) &udpserver, sizeof(udpserver));
-	int64_t spent_time = now()%10000000000;
+	int sel = select(fds + 1, NULL, &rset, NULL, NULL);
 
-	if (bytes_sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EMSGSIZE))
+	if (sel == -1)
 	{
-		printf("Buffer is overloaded...\n");
-		printf("While sending rtp file frame %d packet %d : %d, %s\n", packet->frame_number, packet->seq, errno, strerror(errno));
-		fprintf(log_all, "Buffer is overloaded...\n");
-		fprintf(log_all,"While sending rtp file frame %d packet %d : %d, %s\n",packet->frame_number, packet->seq, errno, strerror(errno));
-		bytes_sent = packet->packetlen;
-		printf("bytes_sent = packetlen = %d \n", bytes_sent);
-		return 0;
+		perror("error in select!");
+		throw std::runtime_error("Bad");
 	}
+	else
+	{
+		if(FD_ISSET(fds, &rset))
+		{
 
-	fprintf(log_rtp, "%4d %6d %10" PRIu16 " %10d %10" PRIu32 " %16" PRIu64 " %16" PRIu64 " %16" PRIu64 "\n",
-			x, packet->packetlen, packet->seq,
-			packet->frame_number, packet->ts, sent_time, st0+(int64_t)(packet->ts*1000000), spent_time);
+			/* We can use sendto in non-blocking way for rescheduling information for another path (using MSG_DONTWAIT flag)
+			 * (Don't forget to check the return value after that!)*/
 
+			bytes_sent = sendto(fds, packet->buf, packet->packetlen, MSG_DONTWAIT, (struct sockaddr *) &udpserver, sizeof(udpserver));
+			int64_t spent_time = now()%10000000000;
+
+			if (bytes_sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EMSGSIZE))
+			{
+				printf("Buffer is overloaded...\n");
+				printf("While sending rtp file frame %d packet %d : %d, %s\n", packet->frame_number, packet->seq, errno, strerror(errno));
+				fprintf(log_all, "Buffer is overloaded...\n");
+				fprintf(log_all,"While sending rtp file frame %d packet %d : %d, %s\n",packet->frame_number, packet->seq, errno, strerror(errno));
+				bytes_sent = packet->packetlen;
+				printf("bytes_sent = packetlen = %d \n", bytes_sent);
+				fprintf(log_rtp, "LOST %4d %6d %10" PRIu16 " %10d %10" PRIu32 " %16" PRIu64 " %16" PRIu64 " %16" PRIu64 "\n",
+						x, packet->packetlen, packet->seq,packet->frame_number, packet->ts, sent_time,
+						st0+(int64_t)(packet->ts*1000000), spent_time);
+
+				return 0;
+			}
+			else
+				fprintf(log_rtp, "%4d %6d %6d %10" PRIu16 " %10d %10" PRIu32 " %16" PRIu64 " %16" PRIu64 " %16" PRIu64 " %16" PRIu16 "\n",
+						x, packet->packetlen, packet->payloadlen, ntohs(*(uint16_t*)(packet->buf+2)),packet->frame_number,
+						ntohl(*(uint64_t*)(packet->buf+4)), sent_time, st0+(int64_t)(packet->ts*1000000),
+						spent_time, ntohs(*(uint16_t*)(packet->buf+22)));
+		}
+	}
 	return bytes_sent;
 }
 
@@ -2002,28 +2018,36 @@ vector<std::pair<double, int> > SB_calculation()
 		/* If Sending Bit rate is smaller that Media Rate */
 		while (1)
 		{
+			int qu = 0;
+
 			for (uint i = 0; i < rtcp_rr_packets.size(); i++)
 			{
-				if (rtcp_rr_packets.at(i).back()->lossrate == 0)
+				qu++;
+				if (rtcp_rr_packets.at(i).empty() != 1)
 				{
-					path_num++;
-					sum_of_SB += Add_SB;
-					if((int)(Media_rate * 100000000) > (int)(sum_of_SB * 100000000))
+
+					if (rtcp_rr_packets.at(i).back()->lossrate == 0)
 					{
-						Add_SB = (SAvB.at(i).first / Media_rate) * (Media_rate - sum_of_SB);
-						SB_total.at(i).first += Add_SB;
-						fprintf(log_all, "!2 sum_of_SB = %f \n", sum_of_SB);
-						fprintf(log_all, "For path %d SB = %f with extra \n", SAvB.at(i).second, SB_total.at(i).first);
+						path_num++;
+						sum_of_SB += Add_SB;
+						if((int)(Media_rate * 100000000) > (int)(sum_of_SB * 100000000))
+						{
+							Add_SB = (SAvB.at(i).first / Media_rate) * (Media_rate - sum_of_SB);
+							SB_total.at(i).first += Add_SB;
+							fprintf(log_all, "!2 sum_of_SB = %f \n", sum_of_SB);
+							fprintf(log_all, "For path %d SB = %f with extra \n", SAvB.at(i).second, SB_total.at(i).first);
+						}
+						else
+							return SB_total;
 					}
-					else
-						return SB_total;
 				}
+				else
+					if(qu == 0)
+						return SB_total;
 			}
 			/*If we have congestion on all paths */
 
-			fprintf(log_all, "3 sum_of_SB = %f \n", sum_of_SB);
-
-			/*Since I don't know why it is impossible escape from a loop even if values of sum_of_SB and Media_Rate are equal, I decided to add +0.00001 to sum_of_SB*/
+				/*Since I don't know why it is impossible escape from a loop even if values of sum_of_SB and Media_Rate are equal, I decided to add +0.00001 to sum_of_SB*/
 /*			if (sum_of_SB >= Media_rate - 0.00001)
 				break;
 			else
@@ -2068,7 +2092,7 @@ int create_packet()
 			for (int i = 0; i <= Media_index.first; i++)
 				payload += (*it)->size.at(i).at(Media_index.second);
 
-			double q = payload / (double) (MTU-MPRTP_HEADER);
+			double q = payload / (double) (MTU-MPRTP_HEADER - 12);
 			int quantity = 0;
 			quantity = (int) ceil(q);
 			fprintf(log_all,"payload = %d quantity = %d \n", payload, quantity);
@@ -2076,23 +2100,23 @@ int create_packet()
 			for (int i = 0; i != quantity; i++)
 			{
 				/*Don't forget to consider MPRTP header in 12 bytes!*/
-				if (payload <= (MTU - MPRTP_HEADER))
+				if (payload <= (MTU - MPRTP_HEADER - 12))
 				{
 					struct rtppacket *packet = NULL;
 
 					packet = new struct rtppacket;
-					memset(packet, 0, sizeof(packet));
 
-					memset(packet->buf + 12, 0, 12);
 					packet->payloadlen = payload;
-					packet->packetlen = packet->payloadlen + 12;
+					packet->packetlen = packet->payloadlen + MPRTP_HEADER + 12; // plus rtp header
 					packet->ts = (*it)->time*1000000;
 					packet->seq_fr = i;
 					packet->seq = seq;
 					packet->frame_number = (*it)->number;
+
 					seq_fr = packet->seq_fr;
 					seq++;
 
+					memset(packet->buf + 12, 0, 12);
 					*(uint16_t*)(packet->buf+2) = htons(packet->seq);
 					*(uint32_t*)(packet->buf+4) = htonl(packet->ts);
 
@@ -2108,11 +2132,9 @@ int create_packet()
 					struct rtppacket *packet = NULL;
 
 					packet = new struct rtppacket;
-					memset(packet, 0, sizeof(packet));
 
-					memset(packet->buf + 12, 0, 12);
-					packet->payloadlen = MTU - MPRTP_HEADER;
-					packet->packetlen = packet->payloadlen + MPRTP_HEADER;
+					packet->payloadlen = MTU - MPRTP_HEADER - 12;
+					packet->packetlen = packet->payloadlen + MPRTP_HEADER + 12;
 					packet->ts = (*it)->time*1000000;
 					packet->seq_fr = i;
 					packet->seq = seq;
@@ -2124,9 +2146,8 @@ int create_packet()
 					*(uint16_t*)(packet->buf+2) = htons(packet->seq);
 					*(uint32_t*)(packet->buf+4) = htonl(packet->ts);
 
-					memset(packet->buf+24,0,packet->payloadlen);
-
-					//memset(packet->buf+24,0,packet->payloadlen);
+					memset(packet->buf + 12, 0, 12);
+					memset(packet->buf+24,1,packet->payloadlen);
 
 					fprintf(log_all, "2 Frame #%d packet_fr#%d packet#%" PRIu16 " payload %d \n", (*it)->number, packet->seq_fr, packet->seq,	packet->payloadlen);
 

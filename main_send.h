@@ -73,9 +73,9 @@ public:
 	uint32_t dump_ts;	/*timestamp of RTP dump. It is similar to timestamp of packet generation from the application*/
 	int payloadlen;
 	int packetlen;
-	int32_t ts;				/*timestamp in RTP file*/
+	int32_t ts;			/*timestamp in RTP file*/
 	uint16_t seq;		/* Sequance number in video sequence*/
-	int seq_fr;	/* Sequance number in a frame*/
+	int seq_fr;        	/* Sequance number in a frame*/
 	int frame_number;
 	char buf[1600];
 	int erase;
@@ -145,11 +145,11 @@ struct rtcprrbuf
 {
 	uint8_t b1;
 	uint8_t b2;
-	uint16_t len; // the length of RTCP packet including the header and any padding
-	uint32_t ssrc;	// synchronization source identifier
-	uint32_t ssrc1; // source identifier to which information in reception report block pertains
-	uint8_t fraclost;// The fraction of RTP data packets from ssrc_1 lost since the previous SR or RR packet was sent
-	int totallost:24;// the total number of RTP data packets from ssrc_1 that have been lost since the beggining of reception
+	uint16_t len;         // the length of RTCP packet including the header and any padding
+	uint32_t ssrc;	      // synchronization source identifier
+	uint32_t ssrc1;       // source identifier to which information in reception report block pertains
+	uint8_t fraclost;     // The fraction of RTP data packets from ssrc_1 lost since the previous SR or RR packet was sent
+	int totallost:24;     // the total number of RTP data packets from ssrc_1 that have been lost since the beggining of reception
 	uint32_t ehsn;
 	uint32_t jitter;
 	uint16_t lsr;
