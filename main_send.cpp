@@ -179,8 +179,6 @@ int main(int argc, char* argv[])
 		if (time_log == NULL)
 			printf("Impossible to open or create txt rtcp_r!!!\n");
 
-
-
 	//Create 3 threads for each interface: 1) for RTP; 2) RTCP send; 3)RTCP receive
 	create_threads(n, ip, port, ipout);
 
@@ -437,14 +435,23 @@ int main(int argc, char* argv[])
 
 		if (!packets_to_send.empty())
 		{
+			printf("Here \n");
 			for (uint i = 0; i < thread_path.size(); i++)
 			{
+
+		//		if (pthread_mutex_lock(&path_status.at(i)->rtp_mutex) != 0)
+		//			throw std::runtime_error("Mutex lock failed");
+
 				if (thread_path.at(i) == SENT)
 				{
 					int64_t t = now();
-					fprintf(log_all, "%" PRId64 " Signal to rtp_send thread %d \n", t, i);
+					printf("%" PRId64 " Signal to rtp_send thread %d \n", t, i);
+
 					pthread_cond_signal(&path_status.at(i)->rtp_cond);
 				}
+		//		if (pthread_mutex_unlock(&path_status.at(i)->rtp_mutex) != 0)
+		//			throw std::runtime_error("Mutex unlock failed");
+
 			}
 
 			if (pthread_mutex_unlock(&list_mutex) != 0)
@@ -457,7 +464,6 @@ int main(int argc, char* argv[])
 		}
 
 		lastpath = thread_path;
-
 
 		if (pthread_mutex_lock(&list_mutex) != 0)
 			throw std::runtime_error("Mutex lock failed");
@@ -1028,7 +1034,7 @@ void* rtp_send(void *arg)
 	if (pthread_mutex_unlock(&path_status.at(x)->rtp_mutex) != 0)
 		throw std::runtime_error("Mutex unlock failed");
 
-	while (globalTerminationFlag == false)
+	while (term_flag == 0)
 	{
 		if (pthread_mutex_lock(&list_mutex) != 0)
 			throw std::runtime_error("Mutex lock failed");
@@ -1037,8 +1043,6 @@ void* rtp_send(void *arg)
 
 		while (p == NULL)
 		{
-			int64_t t1 = now() % 10000000000;
-
 			for (std::list<struct rtppacket *>::iterator it = packets_to_send.begin(); it != packets_to_send.end() && p == NULL;)
 			{
 				//If the number of path in (struct rtppacket *packet) is equal to the number of interface -> send the packet
@@ -1049,6 +1053,18 @@ void* rtp_send(void *arg)
 
 				if (count_sent == NUM || count_nsent != 0 || (*it)->erase == 0)
 				{
+
+					if (pthread_mutex_lock(&path_status.at(x)->rtp_mutex) != 0)
+						throw std::runtime_error("Mutex lock failed");
+
+				/*	while ((*it)->path.at(x) != SENT)
+					{
+						printf("waiting for a rtp signal \n");
+						pthread_cond_wait(&path_status.at(x)->rtp_cond, &path_status.at(x)->rtp_mutex);
+					}
+					if (pthread_mutex_unlock(&path_status.at(x)->rtp_mutex) != 0)
+						throw std::runtime_error("Mutex unlock failed");
+*/
 					if ((*it)->path.at(x) == SENT)
 					{
 						byte_sent = sending_rtp(x, fds, *it);
@@ -1074,16 +1090,10 @@ void* rtp_send(void *arg)
 				else
 					++it;
 			}
-			int64_t t2 = now() % 10000000000;
-	//		fprintf(log_all, "%" PRId64 " after FOR rtp_send \n", t2);
 
 			if (p == NULL)
 			{
-				int64_t t1 = now() % 10000000000;
-	//			fprintf(log_all, "%" PRId64 " before waiting in rtp_send \n", t1);
-				pthread_cond_wait(&path_status.at(x)->rtp_cond, &list_mutex);
-				int64_t t2 = now() % 10000000000;
-	//			fprintf(log_all, "%" PRId64 " after waiting in rtp_send, Send time in waiting = %" PRId64 " \n", t2, t2 - t1);
+				pthread_cond_wait(&path_status.at(x)->rtp_cond, &path_status.at(x)->rtp_mutex);
 			}
 		}
 
@@ -1177,7 +1187,7 @@ void *send_rtcp(void *arg)
 {
 	int x = (long) ((int *) arg);
 
-	while (globalTerminationFlag == false)
+	while (term_flag == 0)
 	{
 		pthread_cond_wait(&path_status.at(x)->rtcp_cond, &path_status.at(x)->rtcp_thread_mutex);
 		struct sockaddr_in rtcpsender;
@@ -1286,7 +1296,7 @@ void* recv_rtcp(void *arg) {
 
 	/*check for rtcp rr*/
 
-	while (globalTerminationFlag == false)
+	while (term_flag == 0)
 	{
 		int64_t time1 = now() % 10000000000;
 //		fprintf(log_all, "%" PRId64 " Time of receiving RR before select \n", time1);
