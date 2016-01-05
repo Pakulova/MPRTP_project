@@ -61,7 +61,7 @@ void rtcprr_list(struct rtcprrbuf * rtcprr ,struct rtcprrbuf *rtcpbuf, int path)
 int sending_rtp (int x, int fds, struct rtppacket * packet);
 void waiting(int64_t wake);
 int64_t now();
-int getrtcpsr (struct rtcpsrbuf * rtcpsr, int64_t time, int path);
+int getrtcpsr (int64_t time, int path);
 
 void signalHandler(int sig);
 
@@ -69,7 +69,7 @@ void signalHandler(int sig);
 struct rtppacket
 {
 public:
-	rtppacket():dump_ts(0), payloadlen(0),packetlen(0),ts(0), seq(0), seq_fr(0), frame_number(0), erase(0), path(NUM, INIT){}
+	rtppacket():dump_ts(0), payloadlen(0),packetlen(0),ts(0), seq(0), seq_fr(0), frame_number(0), erase(NUM, INIT), path(NUM, INIT){}
 	uint32_t dump_ts;	/*timestamp of RTP dump. It is similar to timestamp of packet generation from the application*/
 	int payloadlen;
 	int packetlen;
@@ -78,7 +78,7 @@ public:
 	int seq_fr;        	/* Sequance number in a frame*/
 	int frame_number;
 	char buf[1600];
-	int erase;
+	std::vector <path_t> erase;
 	std::vector <path_t> path;       //Declare a vector of path_type elements
 //	clock_t wait;		/*number of clocks to wait before sending packet*/
 };
@@ -117,6 +117,7 @@ struct status
 	pthread_cond_t rtp_cond;
 	pthread_cond_t rtcp_cond;
 	pthread_mutex_t rtcp_thread_mutex;
+	pthread_mutex_t rtp_thread_mutex;
 	uint16_t seq_num;
 	uint32_t sender_pc; /*packet count*/
 	uint32_t sender_oc; /*octet count*/
@@ -124,8 +125,10 @@ struct status
 	uint32_t lastsender_pc;
 	uint32_t last_ehsn;
 	int64_t last_rrtime;
-
 	int16_t rtp_oc_count;  /*number of octets sent between two consecutive RR packet*/
+
+	std::vector<struct rtppacket *> packet;
+	std::vector<struct rtcpsrbuf *> rtcpsr;
 
 	int rtcp_sock;
 	int txport;
@@ -182,7 +185,8 @@ struct mprtphead
 
 struct rtcpsrbuf
 {
-//	pthread_mutex_t rtcpsr_mutex;
+public:
+	rtcpsrbuf(): b1(0), b2(0), len(0), ssrc(0),ntpts(0),ntpts_frac(0),rtpts(0),sender_pc(0),sender_oc(0){}
 	uint8_t b1;					//1
 	uint8_t b2;					//1
 	uint16_t len;				//2
