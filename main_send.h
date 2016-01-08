@@ -57,6 +57,7 @@ void insert_data_to_list(struct rtppacket * packet);
 void MPRTP_update_subflow(struct mprtphead * mrheader, char * buf, int x);
 void MPRTP_Init_subflow(struct mprtphead * mrheader, uint16_t x);
 void rtcprr_list(struct rtcprrbuf * rtcprr ,struct rtcprrbuf *rtcpbuf, int path);
+void remove_element_from_frame_list();
 
 int sending_rtp (int x, int fds, struct rtppacket * packet);
 void waiting(int64_t wake);
@@ -116,7 +117,8 @@ struct status
 	pthread_mutex_t rtp_mutex;
 	pthread_cond_t rtp_cond;
 	pthread_cond_t rtcp_cond;
-	pthread_mutex_t rtcp_thread_mutex;
+	pthread_mutex_t rtcpsr_thread_mutex;
+	pthread_mutex_t rtcprr_thread_mutex;
 	pthread_mutex_t rtp_thread_mutex;
 	uint16_t seq_num;
 	uint32_t sender_pc; /*packet count*/
@@ -194,8 +196,8 @@ public:
 	uint32_t ntpts;			    //4
 	uint32_t ntpts_frac;	    //4
 	uint32_t rtpts;
-	uint32_t sender_pc; /*packet count*/
-	uint32_t sender_oc; /*octet count*/
+	uint32_t sender_pc; 		/*packet count*/
+	uint32_t sender_oc; 		/*octet count*/
 };
 
 /*RTCP Common Functions*/
