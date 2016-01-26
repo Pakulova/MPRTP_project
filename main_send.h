@@ -9,7 +9,8 @@
 #define MAIN_SEND_H_
 
 enum path_t {INIT = 0, SENT = 1, NSENT = 2, DELETE = 3};
-enum alloc {NONALLOC = 0, ALLOC = 1};							//deffirinciate the condition of a frame: allocated to a path or not
+enum alloc {NONALLOC = 0, ALLOC = 1};							//defirinciate the condition of a frame: allocated to a path or not
+//enum type {U = 0, I = 1, B = 2, P = 3};								//defirinciate the type of a frame: I-frame, B-frame or P-frame
 
 #define MPR_TYPE_SUBFLOW 0x00
 #define MPR_H_EXTID 0x02
@@ -81,6 +82,8 @@ public:
 	char buf[1600];
 	std::vector <path_t> erase;
 	std::vector <path_t> path;       //Declare a vector of path_type elements
+//	type type;
+	char frame_type[10];
 //	clock_t wait;		/*number of clocks to wait before sending packet*/
 };
 
