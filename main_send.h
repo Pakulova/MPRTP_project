@@ -61,7 +61,7 @@ void rtcprr_list(struct rtcprrbuf * rtcprr ,struct rtcprrbuf *rtcpbuf, int path)
 void remove_element_from_frame_list();
 
 int sending_rtp (int x, int fds, struct rtppacket * packet);
-void waiting(int64_t wake);
+int64_t waiting(int64_t wake);
 int64_t now();
 int getrtcpsr (int64_t time, int path);
 
@@ -105,13 +105,15 @@ public:
 struct time
 {
 public:
-	time(): wake(0), st0(0), before_wait(0), after_wait(0),before_SB(0),after_SB(0){}
+	time(): wake(0), after_create(0), st0(0), before_wait(0), after_wait(0),before_SB(0),after_SB(0), after_path_sched(0){}
 	int64_t wake;
+	int64_t after_create;
 	int64_t st0;
 	int64_t before_wait;
 	int64_t after_wait;
 	int64_t before_SB;
 	int64_t after_SB;
+	int64_t after_path_sched;
 };
 
 
