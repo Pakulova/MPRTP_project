@@ -53,7 +53,6 @@ vector<path_t> packets_path_select(const vector<path_t>& lastpath);
 vector<std::pair<double, int > > SB_calculation ();
 vector <path_t> path_SB_scheduling(std::vector<std::pair<double, int > > SB_total);
 
-void insert_data_to_frame_list(struct trace * frame);
 void insert_data_to_list(struct rtppacket * packet);
 void MPRTP_update_subflow(struct mprtphead * mrheader, char * buf, int x);
 void MPRTP_Init_subflow(struct mprtphead * mrheader, uint16_t x);
@@ -71,7 +70,8 @@ void signalHandler(int sig);
 struct rtppacket
 {
 public:
-	rtppacket():dump_ts(0), payloadlen(0),packetlen(0),ts(0), seq(0), seq_fr(0), frame_number(0), erase(NUM, INIT), path(NUM, INIT){}
+	rtppacket():dump_ts(0), payloadlen(0),packetlen(0),ts(0), seq(0), seq_fr(0), frame_number(0),
+	erase(NUM, INIT), path(NUM, INIT), create_time(0), alloc_time(0), before_create(0), sent_flag(0){}
 	uint32_t dump_ts;	/*timestamp of RTP dump. It is similar to timestamp of packet generation from the application*/
 	int payloadlen;
 	int packetlen;
@@ -82,9 +82,12 @@ public:
 	char buf[1600];
 	std::vector <path_t> erase;
 	std::vector <path_t> path;       //Declare a vector of path_type elements
-//	type type;
 	char frame_type[10];
-//	clock_t wait;		/*number of clocks to wait before sending packet*/
+	int64_t create_time;
+	int64_t alloc_time;
+	int64_t before_create;
+	int sent_flag;
+
 };
 
 struct trace
@@ -120,9 +123,11 @@ public:
 struct status
 {
 	pthread_mutex_t rtp_mutex;
+	pthread_mutex_t rtp_mutex_list;
 	pthread_cond_t rtp_cond;
 	pthread_cond_t rtcp_cond;
 	pthread_mutex_t rtcpsr_thread_mutex;
+	pthread_mutex_t rtcpsr_mutex_list;
 	pthread_mutex_t rtcprr_thread_mutex;
 	pthread_mutex_t rtp_thread_mutex;
 	uint16_t seq_num;
