@@ -9,15 +9,15 @@
 #define MAIN_SEND_H_
 
 enum path_t {INIT = 0, SENT = 1, NSENT = 2, DELETE = 3};
-enum alloc {NONALLOC = 0, ALLOC = 1};							//defirinciate the condition of a frame: allocated to a path or not
-//enum type {U = 0, I = 1, B = 2, P = 3};								//defirinciate the type of a frame: I-frame, B-frame or P-frame
+enum alloc {NONALLOC = 0, ALLOC = 1};							//deffirenciate the condition of a frame: allocated to a path or not
+//enum type {U = 0, I = 1, B = 2, P = 3};						//deffirenciate the type of a frame: I-frame, B-frame or P-frame
 
 #define MPR_TYPE_SUBFLOW 0x00
 #define MPR_H_EXTID 0x02
 #define RTP_H_EXTID 0x00E8
 #define EXT_MASK 0x10
 #define RTCP_SR_B1 0x80
-#define RTCP_SR_B2 0xC8 //200 in decimel
+#define RTCP_SR_B2 0xC8 										//200 in decimel
 #define RTCP_RR_B2 0xC9
 #define BUFLEN 2048
 #define NUM 2
@@ -152,7 +152,7 @@ struct status
 	/*path characteristic variables*/
 	int rrcount;
 	int rrcount_prev;
-	double total_lossrate;
+	int32_t total_lossrate;
 
 };
 
@@ -177,7 +177,7 @@ struct rtcprrbuf
 	int64_t rrtime;
 	int64_t rtt;
 	double lossrate;
-	double Bnd;
+	int64_t Bnd;
 
 
 	int rtp_int_sent; //???

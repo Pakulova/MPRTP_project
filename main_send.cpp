@@ -317,12 +317,12 @@ int main(int argc, char* argv[])
 
 			time.before_SB = now();
 
-			//		SB_total = SB_calculation();
+			SB_total = SB_calculation();
 
-			for(int y = 0; y < NUM; y++)
+	/*		for(int y = 0; y < NUM; y++)
 			{
-				Media_index.first = LAYERS - 1;
-				Media_index.second = FPS - 1;
+				Media_index.first = 0;
+				Media_index.second = 0;
 
 				SB_total.at(y).second = y;
 
@@ -334,10 +334,10 @@ int main(int argc, char* argv[])
 
 			for (uint i = 0; i < SB_total.size(); i++)
 			{
-		//		if (pthread_mutex_lock(&path_status.at(i)->rtp_mutex) != 0)
-		//			throw std::runtime_error("Mutex lock failed");
+				if (pthread_mutex_lock(&path_status.at(i)->rtp_mutex) != 0)
+					throw std::runtime_error("Mutex lock failed");
 
-				struct timespec timeout;
+/*				struct timespec timeout;
 				struct timeval timenow;
 
 				gettimeofday(&timenow, NULL);
@@ -349,7 +349,7 @@ int main(int argc, char* argv[])
 					printf( "Error during rtp mutex %s \n",  strerror(errno));
 					throw std::runtime_error("Mutex lock failed");
 				}
-
+*/
 				if (path_status.at(i)->rrcount == 0	&& path_status.at(i)->rrcount_prev == 0)
 				{
 					path_status.at(i)->rrcount_prev = -1;
@@ -392,7 +392,7 @@ int main(int argc, char* argv[])
 
 		create_packet();
 
-		struct timespec timeout;
+/*		struct timespec timeout;
 		struct timeval timenow;
 
 		gettimeofday(&timenow, NULL);
@@ -405,14 +405,14 @@ int main(int argc, char* argv[])
 				printf( "Error during rtp mutex %d \n", errno);
 				throw std::runtime_error("Mutex lock failed");
 			}
-
-/*		for (uint i = 0; i < NUM; i++)
+*/
+		for (uint i = 0; i < NUM; i++)
 			if (pthread_mutex_lock(&path_status.at(i)->rtp_thread_mutex) != 0)
 			{
 				printf( "Error during rtp mutex %d \n", errno);
 				throw std::runtime_error("Mutex lock failed");
 			}
-*/		/*Allocate packet to an appropriate path*/
+		/*Allocate packet to an appropriate path*/
 		thread_path = path_SB_scheduling(SB_total);
 
 #endif
@@ -446,7 +446,7 @@ int main(int argc, char* argv[])
 			struct timespec timeout;
 			struct timeval timenow;
 
-			gettimeofday(&timenow, NULL);
+/*			gettimeofday(&timenow, NULL);
 			timeout.tv_sec = timenow.tv_sec;
 			timeout.tv_nsec = 100000;
 
@@ -457,9 +457,9 @@ int main(int argc, char* argv[])
 			}
 			if(ret != 0)
 				throw std::runtime_error("Mutex lock failed");
-
-//			if (pthread_mutex_lock(&path_status.at(i)->rtp_mutex_list) != 0)
-//				throw std::runtime_error("Mutex lock failed");
+*/
+			if (pthread_mutex_lock(&path_status.at(i)->rtp_mutex_list) != 0)
+				throw std::runtime_error("Mutex lock failed");
 
 			if (path_status.at(i)->packet.empty() == 1)
 				counter++;
@@ -487,9 +487,9 @@ int main(int argc, char* argv[])
 				printf("Error during the termination rtcpsr thread: %d \n", errno);
 
 			printf("Total number of packet sent to path %d = %d \n", i, path_status.at(i)->sender_pc);
-			printf("Total lost for path %d = %f \n", i, path_status.at(i)->total_lossrate);
+			printf("Total lost for path %d = %" PRId32 " \n", i, path_status.at(i)->total_lossrate);
 			fprintf(log_all, "Total number of packet sent to path %d = %d \n", i, path_status.at(i)->sender_pc);
-			fprintf(log_all, "Total lost for path %d = %f \n", i, path_status.at(i)->total_lossrate);
+			fprintf(log_all, "Total lost for path %d = %" PRId32 " \n", i, path_status.at(i)->total_lossrate);
 		}
 
 		int64_t t_finish = now();
@@ -962,8 +962,6 @@ void* rtp_send(void *arg)
 	struct timespec timeoutsr;
 
 	//Initialize socket for rtp connection
-	struct timespec timeout1;
-	struct timeval timenow1;
 
 	if (pthread_mutex_lock(&path_status.at(x)->rtp_mutex) != 0)
 		throw std::runtime_error("Mutex lock failed");
@@ -1014,8 +1012,8 @@ void* rtp_send(void *arg)
 
 		fprintf(log_all, "%d size of path list %zu \n", x, path_status.at(x)->packet.size());
 
-		fprintf(log_all, "%d Send packet #%" PRIu16 " fr# %d \n", x, path_status.at(x)->packet.front()->seq,
-				path_status.at(x)->packet.front()->frame_number);
+//		fprintf(log_all, "%d Send packet #%" PRIu16 " fr# %d \n", x, path_status.at(x)->packet.front()->seq,
+//				path_status.at(x)->packet.front()->frame_number);
 
 		printf("%d Send packet #%" PRIu16 " fr# %d \n", x, path_status.at(x)->packet.front()->seq,
 						path_status.at(x)->packet.front()->frame_number);
@@ -1027,18 +1025,6 @@ void* rtp_send(void *arg)
 		int64_t time_mute2 = now();
 		fprintf(log_for, " %" PRId64 " %" PRId64 " \n", time_mute, time_mute2);
 
-/*		gettimeofday(&timenow1, NULL);
-		timeout1.tv_sec = timenow1.tv_sec;
-		timeout1.tv_nsec = 100000;
-
-		int ret2 = pthread_mutex_timedlock(&path_status.at(x)->rtp_mutex, &timeout1);
-		if(ret2 == ETIMEDOUT)
-		{
-			printf( "Error during rtp mutex %s \n",  strerror(errno));
-		}
-		if(ret2 != 0)
-			throw std::runtime_error("Mutex lock failed");
-*/
 		int64_t t1 = now();
 
 		if (pthread_mutex_lock(&path_status.at(x)->rtp_mutex) != 0)
@@ -1056,30 +1042,6 @@ void* rtp_send(void *arg)
 		if (pthread_mutex_unlock(&path_status.at(x)->rtp_mutex) != 0)
 			throw std::runtime_error("Mutex lock failed");
 
-/*		gettimeofday(&timenow1, NULL);
-		timeout1.tv_sec = timenow1.tv_sec;
-		timeout1.tv_nsec = 100000;
-
-		int ret3 = pthread_mutex_timedlock(&path_status.at(x)->rtp_mutex_list, &timeout1);
-		if(ret3 == ETIMEDOUT)
-		{
-			printf( "Error during rtp mutex list %s \n",  strerror(errno));
-		}
-		if(ret3 != 0)
-			throw std::runtime_error("Mutex lock failed");
-*/
-
-		if (pthread_mutex_lock(&path_status.at(x)->rtp_mutex_list) != 0)
-			throw std::runtime_error("Mutex lock failed");
-
-//		printf("%d It is necessary to remove packet %" PRIu16 " from vector \n", x,	path_status.at(x)->packet.front()->seq);
-		path_status.at(x)->packet.erase(path_status.at(x)->packet.begin());
-//		printf("%d After remove packet %" PRIu16 " from vector \n", x,	path_status.at(x)->packet.front()->seq);
-//		printf("path_status.at(x)->packet. size = %zu \n", path_status.at(x)->packet.size());
-
-		if (pthread_mutex_unlock(&path_status.at(x)->rtp_mutex_list) != 0)
-			throw std::runtime_error("Mutex unlock failed");
-
 		// Call the rtcp send thread
 
 		// How to initialize it????? what is the value????
@@ -1093,33 +1055,28 @@ void* rtp_send(void *arg)
 		int64_t time_rtp_mut = now();
 
 		fb_interval = rtcp_interval(i_senders * 2, i_senders, RTCP_BW, 1, 56/*RTCPSR+UDP+IP*/, &avg_rtcp_size, 1, 0.1);
-		//	fprintf(log_all,"fb_interval = %" PRId64" \n", fb_interval);
-
-
-		gettimeofday(&timenow1, NULL);
-		timeout1.tv_sec = timenow1.tv_sec;
-		timeout1.tv_nsec = 100000;
-
-
-	//	if (pthread_mutex_lock(&path_status.at(x)->rtcpsr_thread_mutex) != 0)
-	//		throw std::runtime_error("Mutex unlock failed");
 
 		int64_t time2 = now();
 
-		//	fprintf(log_all, "(time2 - time1) - fb_interval = (%" PRId64 ") \n", time2 - time1 - fb_interval);
+//		fprintf(log_all, "(time2 (%" PRId64 ") - time1 (%" PRId64 ")) - fb_interval (%" PRId64 ") = (%" PRId64 ") \n",
+//				time2, time1, fb_interval, time2 - time1 - fb_interval);
+
+//		struct timespec timeout1;
+//		timeout1.tv_sec = 60;
+//		timeout1.tv_nsec = 0;
 
 		if (time2 - time1 > fb_interval)
 		{
-			int ret1 = pthread_mutex_timedlock(&path_status.at(x)->rtcpsr_thread_mutex, &timeout1);
-			if(ret1 == ETIMEDOUT)
+			int ret1 = pthread_mutex_lock(&path_status.at(x)->rtcpsr_thread_mutex);
+	/*		if(ret1 == ETIMEDOUT)
 			{
 				printf( "Error during rtcpsr thread mutex %s \n",  strerror(errno));
 			}
-			if(ret1 != 0)
+*/			if(ret1 != 0)
 				throw std::runtime_error("Mutex lock failed");
 
 			getrtcpsr(time2, x);
-			//		fprintf(log_all, "%d Sending RTCP report \n", x);
+			fprintf(log_all, "%d Sending RTCP report \n", x);
 
 			if (pthread_cond_signal(&path_status.at(x)->rtcp_cond) != 0)
 				throw std::runtime_error("Pthread_cond_signal failed");
@@ -1131,6 +1088,28 @@ void* rtp_send(void *arg)
 		}
 		int64_t time_rtp_mut2 = now();
 		fprintf(log_while, "%" PRId64 " %" PRId64 " \n",time_rtp_mut, time_rtp_mut2);
+
+		if (pthread_mutex_lock(&path_status.at(x)->rtp_mutex_list) != 0)
+			throw std::runtime_error("Mutex lock failed");
+
+		if(path_status.at(x)->packet.begin() != path_status.at(x)->packet.end())
+		{
+			//		printf("%d It is necessary to remove packet %" PRIu16 " from vector \n", x,	path_status.at(x)->packet.front()->seq);
+			path_status.at(x)->packet.erase(path_status.at(x)->packet.begin());
+			//		printf("%d After remove packet %" PRIu16 " from vector \n", x,	path_status.at(x)->packet.front()->seq);
+			//		printf("path_status.at(x)->packet. size = %zu \n", path_status.at(x)->packet.size());
+		}
+		else
+		{
+
+			if (pthread_mutex_unlock(&path_status.at(x)->rtp_mutex_list) != 0)
+				throw std::runtime_error("Mutex unlock failed");
+
+			continue;
+		}
+
+		if (pthread_mutex_unlock(&path_status.at(x)->rtp_mutex_list) != 0)
+			throw std::runtime_error("Mutex unlock failed");
 
 	}
 	return NULL;
@@ -1219,7 +1198,16 @@ void *send_rtcp(void *arg)
 		if (pthread_mutex_lock(&path_status.at(x)->rtcpsr_mutex_list) != 0)
 			throw std::runtime_error("Mutex lock failed");
 
-		path_status.at(x)->rtcpsr.erase(path_status.at(x)->rtcpsr.begin());
+		if(path_status.at(x)->packet.begin() != path_status.at(x)->packet.end())
+		{
+			path_status.at(x)->rtcpsr.erase(path_status.at(x)->rtcpsr.begin());
+		}
+		else
+		{
+			if (pthread_mutex_unlock(&path_status.at(x)->rtcpsr_mutex_list) != 0)
+						throw std::runtime_error("Mutex lock failed");
+			continue;
+		}
 
 		if (pthread_mutex_unlock(&path_status.at(x)->rtcpsr_mutex_list) != 0)
 			throw std::runtime_error("Mutex lock failed");
@@ -1277,10 +1265,9 @@ int getrtcpsr(int64_t time2, int x)
 			ntpts, tmp1);
 */
 
-/*	fprintf(log_rtcp_s, "%d  %" PRId64 "   %10" PRIu32 " %10" PRIu32 " \n", x,
-			time2, rtcpsr->sender_oc, rtcpsr->sender_pc);
-*/
-//	fprintf(log_all, " Time of sending RTCP Report %" PRId64 " : %" PRId64 " \n", (int64_t) rtcpsr->ntpts, (int64_t) rtcpsr->ntpts_frac);
+	fprintf(log_rtcp_s, "%d  %" PRId64 "   %10" PRIu32 " %10" PRIu32 " \n", x, time2, rtcpsr->sender_oc, rtcpsr->sender_pc);
+
+	fprintf(log_all, " Time of sending RTCP Report %" PRId64 " : %" PRId64 " \n", (int64_t) rtcpsr->ntpts, (int64_t) rtcpsr->ntpts_frac);
 	return 28;
 }
 
@@ -1296,7 +1283,7 @@ void* recv_rtcp(void *arg)
 	struct rtcprrbuf *p = NULL;
 
 	struct timeval timeout;
-	timeout.tv_sec = 2*60*1000000;
+	timeout.tv_sec = 2*60;
 	timeout.tv_usec = 0;
 
 	printf("path_status.at(x)->rtcp_sock = %d \n", path_status.at(x)->rtcp_sock);
@@ -1352,13 +1339,15 @@ void* recv_rtcp(void *arg)
 						/*Set RTCP_RR_flag to true after receiving the first RTCP packet*/
 						if (path_status.at(x)->rrcount == 0)
 							RTCP_RR_flag = 0;
-						else {
-							if (path_status.at(x)->rrcount == 1) {
+						else
+						{
+							if (path_status.at(x)->rrcount == 1)
+							{
 								RTCP_RR_flag = 1;
-					//			fprintf(log_all, "RTCP_RR_flag = 1\n");
+								fprintf(log_all, "RTCP_RR_flag = 1\n");
 							} else {
 								RTCP_RR_flag = 2;
-					//			fprintf(log_all, "RTCP_RR_flag = 1\n");
+								fprintf(log_all, "RTCP_RR_flag = 1\n");
 							}
 						}
 
@@ -1377,12 +1366,10 @@ void* recv_rtcp(void *arg)
 						rtcp_rr_packets.at(x).push_back(rtcprr);
 						/*						fprintf(log_all, "%d Size of a rtcprr list = %zu \n", x,	rtcp_rr_packets.at(x).size());
 
-						 fprintf(log_all,
+					*/	 fprintf(log_all,
 						 "************************************************************\n");
-						 fprintf(log_all,
-						 "%d bnd just after filling a list %f \n", x,
-						 rtcp_rr_packets.at(x).back()->Bnd);
-						 */
+						 fprintf(log_all, "%d bnd just after filling a list %f \n", x, rtcp_rr_packets.at(x).back()->Bnd);
+
 
 						path_status.at(x)->rtp_oc_count = 0;
 
@@ -1390,7 +1377,7 @@ void* recv_rtcp(void *arg)
 							throw std::runtime_error("Mutex unlock failed");
 
 				//		fprintf(log_all, "%d RTCP RR term_flag =%d \n", x, term_flag);
-						//					fprintf(log_all, "%d rrcount in recv_rtcp %d \n", x, path_status.at(x)->rrcount);
+						fprintf(log_all, "%d rrcount in recv_rtcp %d \n", x, path_status.at(x)->rrcount);
 					}
 				}
 			}
@@ -1402,9 +1389,10 @@ void* recv_rtcp(void *arg)
 	return NULL;
 }
 
-void rtcprr_list(struct rtcprrbuf * rtcprr, struct rtcprrbuf * buf, int x) {
+void rtcprr_list(struct rtcprrbuf * rtcprr, struct rtcprrbuf * buf, int x)
+{
 	int64_t rrtime = 0;
-	double delta_t = 0;
+	int64_t delta_t = 0;
 	rrtime = now();
 	p_rrtime = rrtime;
 	rtcprr->rrtime = rrtime;
@@ -1432,7 +1420,7 @@ void rtcprr_list(struct rtcprrbuf * rtcprr, struct rtcprrbuf * buf, int x) {
 	//calculate PLR
 	rtcprr->lossrate = ((double) (rtcprr->fraclost)) / 256;
 
-	double payload = ((double) path_status.at(x)->sender_oc	- (double) path_status.at(x)->lastsender_oc) * 8;
+	uint32_t payload = (path_status.at(x)->sender_oc - path_status.at(x)->lastsender_oc) * 8;
 	fprintf(log_rtcp_r,
 			"% d  %" PRId64 " %16" PRIu32 " %16f %16" PRId32 "   %16" PRIu32 " %16" PRIu16 ":%" PRIu16 " %16" PRIu16 ":%" PRIu16 " %16" PRIu32 "\n",
 			x, rrtime, rtcprr->ehsn, rtcprr->lossrate,
@@ -1442,43 +1430,51 @@ void rtcprr_list(struct rtcprrbuf * rtcprr, struct rtcprrbuf * buf, int x) {
 
 	if (path_status.at(x)->rrcount == 0)
 	{
-		delta_t = ((double) p_rrtime - (double) st0) / 1000000;
-		rtcprr->Bnd = payload * (1 - rtcprr->lossrate) / delta_t;
+		fprintf(log_all, "p_rrtime - st0 = %" PRId64 " \n", p_rrtime - st0);
+		delta_t = p_rrtime - st0;
+		fprintf(log_all,"1 delta_t = %" PRId64 "\n", delta_t);
+
+		rtcprr->Bnd = ((payload * (1 - rtcprr->lossrate)) * 1000000 / delta_t);
+
+		fprintf(log_all, "Bnd  = %" PRId64 "'n", rtcprr->Bnd);
 		fprintf(path_par,
-				"%5d %10" PRId64 " %9.6f %17f %14f %14f %14f %18" PRId64 " %10f %7" PRIu32 " %7" PRIu32 " %7s %7" PRId32 " \n",
+				"%d %10" PRId64 " %9.6f %17" PRId64 " %14" PRIu32 " %14" PRIu32 " %14" PRIu32 " %18" PRId64 " %10" PRId64 " %7" PRIu32 ""
+						" %7" PRIu32 " %7s %7" PRId32 " \n",
 				x, rtcprr->rtt, rtcprr->lossrate, rtcprr->Bnd, payload,
-				(double) path_status.at(x)->sender_oc * 8,
-				(double) path_status.at(x)->lastsender_oc * 8, p_rrtime,
+				path_status.at(x)->sender_oc * 8,
+				path_status.at(x)->lastsender_oc * 8, p_rrtime,
 				delta_t, rtcprr->ehsn, path_status.at(x)->last_ehsn, "0",
 				(int32_t) rtcprr->totallost);
 	}
 
-	if (path_status.at(x)->rrcount > 0
-			&& path_status.at(x)->lastsender_oc
-					!= path_status.at(x)->sender_oc) {
+	if (path_status.at(x)->rrcount > 0  && path_status.at(x)->lastsender_oc != path_status.at(x)->sender_oc)
+	{
 		// Calculate Bandwidth on a path
-		delta_t = ((double) p_rrtime - (double) path_status.at(x)->last_rrtime)
-				/ 1000000;
-		rtcprr->Bnd = payload * (1 - rtcprr->lossrate) / delta_t;
-		uint32_t dif_pc = path_status.at(x)->sender_pc
-				- path_status.at(x)->lastsender_pc;
+		fprintf(log_all, "p_rrtime = %" PRId64 " path_status.at(x)->last_rrtime = %" PRId64 "\n", p_rrtime, path_status.at(x)->last_rrtime);
 
-/*		fprintf(log_all,
-				"%d Bnd = %f, sender_oc (%f), lastsender_oc (%f), sender_pc (%f), last_sender_pc (%f), ehsn(%" PRIu32 ") \n",
+		delta_t = p_rrtime - path_status.at(x)->last_rrtime;
+		fprintf(log_all,"2 delta_t = %" PRId64 "\n", delta_t);
+
+		rtcprr->Bnd = (payload * (1 - rtcprr->lossrate)) * 1000000 / delta_t;
+		uint32_t dif_pc = path_status.at(x)->sender_pc - path_status.at(x)->lastsender_pc;
+
+		fprintf(log_all,
+				"%d Bnd = %" PRId64 ", sender_oc (%f), lastsender_oc (%f), sender_pc (%f), last_sender_pc (%f), ehsn(%" PRIu32 ") \n",
 				x, rtcprr->Bnd, (double) path_status.at(x)->sender_oc,
 				(double) path_status.at(x)->lastsender_oc,
 				(double) path_status.at(x)->sender_pc,
 				(double) path_status.at(x)->lastsender_pc, rtcprr->ehsn);
 
 		fprintf(log_all, "Totallost = %" PRId32 ", fraclost = %f  \n", (int32_t) rtcprr->totallost, (double) rtcprr->fraclost);
-*/
+
 		fprintf(path_par,
-				"%5d %10" PRId64 " %9.6f %17f %14f %14f %14f %18" PRId64 " %10f %7" PRIu32 " %7" PRIu32 " %7" PRId32 " %7" PRId32 " %10f\n",
+				"%d %10" PRId64 " %9.6f %17" PRId64 " %14" PRIu32 " %14" PRIu32 " %14" PRIu32 " %18" PRId64 " %10" PRId64 " %7" PRIu32 " "
+						"%7" PRIu32 " %7" PRId32 " %7" PRId32 "\n",
 				x, rtcprr->rtt, rtcprr->lossrate, rtcprr->Bnd, payload,
-				(double) path_status.at(x)->sender_oc * 8,
-				(double) path_status.at(x)->lastsender_oc * 8, p_rrtime,
+				path_status.at(x)->sender_oc * 8,
+				path_status.at(x)->lastsender_oc * 8, p_rrtime,
 				delta_t, rtcprr->ehsn, path_status.at(x)->last_ehsn, dif_pc,
-				rtcprr->totallost, 1 - rtcprr->lossrate);
+				(uint32_t)rtcprr->totallost);
 	}
 
 	/* save last received characteristics */
@@ -1503,7 +1499,7 @@ int UDP_Init(int x, int localport, char * ipout) {
 	mpaddr1.sin_port = htons(localport);
 	if (inet_aton(ipout, &mpaddr1.sin_addr) == 0)
 		perror("Cannot get an out ip address");
-//	mpaddr1.sin_addr.s_addr = htonl(INADDR_ANY);
+	//	mpaddr1.sin_addr.s_addr = htonl(INADDR_ANY);
 	if (bind(s, (struct sockaddr*) &mpaddr1, sizeof(mpaddr1)) < 0)
 		perror("bind failed");
 	return s;
@@ -1512,7 +1508,12 @@ int UDP_Init(int x, int localport, char * ipout) {
 int sending_rtp(int x, int fds, struct rtppacket * packet)
 {
 	struct sockaddr_in udpserver;
+	struct timeval timeout;
 	int bytes_sent = 0;
+
+	timeout.tv_sec = 1;
+	timeout.tv_usec = 0;
+	int64_t delay = timeout.tv_sec * 1000000 + timeout.tv_usec;
 
 	memset((char *) &udpserver, 0, sizeof(udpserver));
 	udpserver.sin_family = PF_INET;
@@ -1529,35 +1530,67 @@ int sending_rtp(int x, int fds, struct rtppacket * packet)
 	if (packet->seq == 1 && packet->frame_number == 1)
 		initial_sent_time = now();
 
-/*	fd_set rset;
-	FD_ZERO(&rset);
-	FD_SET(fds, &rset);
+	int64_t timenow = now();
 
-	int sel = select(fds + 1, NULL, &rset, NULL, NULL);
+//	fprintf(log_all, "timenow %" PRId64 " - ideal %" PRId64 " - delay = %" PRId64 "\n",
+//			timenow, st0 + packet->ts, timenow - (st0 + (int64_t)packet->ts));
 
-	if (sel == -1)
+	if(timenow - delay > (st0 + (int64_t)packet->ts))
 	{
-		perror("error in select!");
-		throw std::runtime_error("Bad");
+		/* Set the first symbol to "8" to show that this packets was dropped */
+		printf("Select: timeout is expired \n");
+		fprintf(log_rtp, "9 %4d %6d %6d %10" PRIu16 " %10d %10" PRIu32 " %16" PRId64 " %16" PRId64 " %16" PRId64 " %16" PRId64 " "
+				" 0\n",
+				x, packet->packetlen, packet->payloadlen,
+				ntohs(*(uint16_t*) (packet->buf + 2)), packet->frame_number, ntohl(*(uint64_t*) (packet->buf + 4)), sent_time,
+				st0 + packet->ts, packet->create_time, packet->alloc_time);
+
+		return 0;
 	}
 	else
 	{
-		if (FD_ISSET(fds, &rset))
+		fd_set rset;
+		FD_ZERO(&rset);
+		FD_SET(fds, &rset);
+
+		int sel = select(fds + 1, NULL, &rset, NULL,  &timeout);
+
+		if (sel == -1)
 		{
-*/
-			/* We can use sendto in non-blocking way for rescheduling information for another path (using MSG_DONTWAIT flag)
-			 * (Don't forget to check the return value after that!)*/
-
-			sent_time = now();
-
-			bytes_sent = sendto(fds, packet->buf, packet->packetlen, MSG_DONTWAIT, (struct sockaddr *) &udpserver, sizeof(udpserver));
-
-			int64_t spent_time = now();
-
-			if (bytes_sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EMSGSIZE))
+			perror("Error in select!");
+			throw std::runtime_error("Bad");
+		}
+		else
+		{
+			/*		if(sel == 0)
 			{
-				printf("Buffer is overloaded...\n");
-	/*			printf("While sending rtp file frame %d packet %" PRIu16 " : %d, %s\n",
+				printf("Select: timeout is expired \n");
+				/* Set the first symbol as "f" to show that this packets was dropped */
+			/*				fprintf(log_rtp, "9 %4d %6d %6d %10" PRIu16 " %10d %10" PRIu32 " %16" PRId64 " %16" PRId64 " %16" PRId64 " %16" PRId64 " "
+						" 0  \n",
+						x, packet->packetlen, packet->payloadlen,
+						ntohs(*(uint16_t*) (packet->buf + 2)), packet->frame_number, ntohl(*(uint64_t*) (packet->buf + 4)), sent_time,
+						st0 + packet->ts, packet->create_time, packet->alloc_time);
+				return 0;
+
+			}
+			 */	if (FD_ISSET(fds, &rset))
+			 {
+
+				 /* We can use sendto in non-blocking way for rescheduling information for another path (using MSG_DONTWAIT flag)
+				  * (Don't forget to check the return value after that!)*/
+
+				 sent_time = now();
+
+				 bytes_sent = sendto(fds, packet->buf, packet->packetlen, MSG_DONTWAIT, (struct sockaddr *) &udpserver, sizeof(udpserver));
+
+
+				 int64_t spent_time = now();
+
+				 if (bytes_sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EMSGSIZE))
+				 {
+					 printf("Buffer is overloaded...\n");
+					 /*			printf("While sending rtp file frame %d packet %" PRIu16 " : %d, %s\n",
 						packet->frame_number, packet->seq, errno, strerror(errno));
 				fprintf(log_all, "Buffer is overloaded...\n");
 				fprintf(log_all, "While sending rtp file frame %d packet %d : %d, %s\n", packet->frame_number, packet->seq, errno,
@@ -1568,19 +1601,23 @@ int sending_rtp(int x, int fds, struct rtppacket * packet)
 				fprintf(log_rtp, "LOST %4d %6d %10" PRIu16 " %10d %10" PRIu32 " %16" PRIu64 " %16" PRIu64 "\n",
 						x, packet->packetlen, packet->seq, packet->frame_number,
 						packet->ts, sent_time, st0 + packet->ts );
-*/
-				return 0;
-			}
-			else
-				fprintf(log_rtp,
-						"%4d %6d %6d %10" PRIu16 " %10d %10" PRIu32 " %16" PRId64 " %16" PRId64 " %16" PRId64 " %16" PRId64 " "
-						"%16" PRId64 "  \n",
-						x, packet->packetlen, packet->payloadlen,
-						ntohs(*(uint16_t*) (packet->buf + 2)), packet->frame_number, ntohl(*(uint64_t*) (packet->buf + 4)), sent_time,
-						st0 + packet->ts, packet->create_time, packet->alloc_time, spent_time);
+					  */
+					 return 0;
+				 }
+				 else
+					 /* Set the first symbol to "9" to show that this packets was sended */
+					 fprintf(log_rtp,
+							 "8 %4d %6d %6d %10" PRIu16 " %10d %10" PRIu32 " %16" PRId64 " %16" PRId64 " %16" PRId64 " %16" PRId64 " "
+							 "%16" PRId64 "\n",
+							 x, packet->packetlen, packet->payloadlen,
+							 ntohs(*(uint16_t*) (packet->buf + 2)), packet->frame_number, ntohl(*(uint64_t*) (packet->buf + 4)), sent_time,
+							 st0 + packet->ts, packet->create_time, packet->alloc_time, spent_time);
 
-	//	}
-//	}
+				 fprintf(log_all, "%d Send packet #%" PRIu16 " fr# %d \n", x, packet->seq, packet->frame_number);
+
+			 }
+		}
+	}
 	return bytes_sent;
 }
 
@@ -1915,7 +1952,7 @@ vector<std::pair<double, int> > SB_calculation()
 
 		if (rtcp_rr_packets.at(i).empty() == 1)
 		{
-	//		fprintf(log_all, "rtcp_rr_packets for %d %zu \n ", i,rtcp_rr_packets.at(i).size());
+			fprintf(log_all, "rtcp_rr_packets for %d %zu \n ", i,rtcp_rr_packets.at(i).size());
 
 			if (pthread_mutex_unlock(&path_status.at(i)->rtcprr_thread_mutex) != 0)
 				throw std::runtime_error("Mutex unlock failed");
@@ -1949,6 +1986,8 @@ vector<std::pair<double, int> > SB_calculation()
 		{
 			/*Calculate aggregated bandwidth for all paths*/
 			//	for(int j = 0; j < NUM; j++)
+			fprintf(log_all, "! rtcp_rr_packets for %d %zu \n ", i,rtcp_rr_packets.at(i).size());
+
 			AgB += rtcp_rr_packets.at(i).back()->Bnd;
 
 			fprintf(log_all, " Aggregated Bandwidth = %f \n", AgB);
@@ -1956,8 +1995,7 @@ vector<std::pair<double, int> > SB_calculation()
 			fprintf(log_all, "&%d Size of rtcp_rr list =%zu \n", i,
 					rtcp_rr_packets.at(i).size());
 			fprintf(log_all, "1 AvB for path %d = %f \n", i, AvB.at(i).first);
-			fprintf(log_all, "%d lossrate = %f \n", i,
-					rtcp_rr_packets.at(i).back()->lossrate);
+			fprintf(log_all, "%d lossrate = %f \n", i, rtcp_rr_packets.at(i).back()->lossrate);
 
 			/////////////////////////////////////////////////////////////////////////////
 			if (common_loss.at(i).size() > 2)
@@ -1973,7 +2011,8 @@ vector<std::pair<double, int> > SB_calculation()
 				common_loss.at(i).push_back(rtcp_rr_packets.at(i).back()->lossrate);
 			}
 
-			for (std::list<struct rtcprrbuf *>::iterator it = rtcp_rr_packets.at(i).begin(); it != rtcp_rr_packets.at(i).end(); ++it) {
+			for (std::list<struct rtcprrbuf *>::iterator it = rtcp_rr_packets.at(i).begin(); it != rtcp_rr_packets.at(i).end(); ++it)
+			{
 				/* find the sum of bandwidth values for path i in sliding window and write this sum to element of pair(path, Average_Bandwidth) */
 				path_sum_Bnd.at(i) += (*it)->Bnd;
 				fprintf(log_all, "%d path_sum_Bnd = %f \n", i, path_sum_Bnd.at(i));
@@ -2085,7 +2124,9 @@ vector<std::pair<double, int> > SB_calculation()
 		{
 
 			sum_of_SB += Add_SB+1;
-		//	printf("Media_rate - sum_of_SB = %" PRId64 "\n", (int64_t) (Media_rate * 100000000) - (int64_t) (sum_of_SB * 100000000));
+	//		printf("Media_rate (%f) - sum_of_SB (%f) = %" PRId64 "\n", Media_rate, sum_of_SB, (int64_t) (Media_rate * 100000000) - (int64_t) (sum_of_SB * 100000000));
+
+			fprintf(log_all, "Media_rate (%f) - sum_of_SB (%f) = %" PRId64 "\n", Media_rate, sum_of_SB, (int64_t) (Media_rate * 100000000) - (int64_t) (sum_of_SB * 100000000));
 
 			if ((int64_t) (Media_rate * 100000000) > (int64_t) (sum_of_SB * 100000000))
 			{
@@ -2298,7 +2339,7 @@ vector<path_t> path_SB_scheduling(std::vector<std::pair<double, int> > SB_total)
 					{
 						(*it)->path.at(i) = SENT;
 						thread_path.at(i) = SENT;
-		//				fprintf(log_path, "!!!%d 	%5" PRIu16 "	 %5d	%5d \n", i, (*it)->seq, (*it)->frame_number, (*it)->ts);
+						fprintf(log_path, "!!!%d 	%5" PRIu16 "	 %5d	%5d \n", i, (*it)->seq, (*it)->frame_number, (*it)->ts);
 		//				fprintf(log_all, "!!!thread_path(%d)	%d \n", i, thread_path.at(i));
 						(*it)->alloc_time = now();
 		//				printf("%" PRId64 " Scheduled %7d %7" PRIu16 " %7d \n", (*it)->alloc_time, i, (*it)->seq, (*it)->frame_number);
@@ -2382,20 +2423,20 @@ vector<path_t> path_SB_scheduling(std::vector<std::pair<double, int> > SB_total)
 							tp.at(SB_total.at(i).second) = tc;
 							thread_path = (*it)->path;
 
-			//				fprintf(log_path, "%d %5" PRIu16 " %5d %5d \n", SB_total.at(i).second, (*it)->seq,
-			//						(*it)->frame_number, (*it)->ts);
+							fprintf(log_path, "%d %5" PRIu16 " %5d %5d \n", SB_total.at(i).second, (*it)->seq,
+									(*it)->frame_number, (*it)->ts);
 
 
 
-//							if (pthread_mutex_lock(&path_status.at(i)->rtp_mutex_list) != 0)
-//								throw std::runtime_error("Mutex lock failed");
+							if (pthread_mutex_lock(&path_status.at(i)->rtp_mutex_list) != 0)
+								throw std::runtime_error("Mutex lock failed");
 
-							struct timespec timeout;
+/*							struct timespec timeout;
 							struct timeval timenow;
 
 							gettimeofday(&timenow, NULL);
 							timeout.tv_sec = timenow.tv_sec;
-							timeout.tv_nsec = 100000;
+							timeout.tv_nsec = 200000;
 
 							int ret = pthread_mutex_timedlock(&path_status.at(i)->rtp_mutex_list, &timeout);
 							if(ret == ETIMEDOUT)
@@ -2404,7 +2445,7 @@ vector<path_t> path_SB_scheduling(std::vector<std::pair<double, int> > SB_total)
 							}
 							if(ret != 0)
 								throw std::runtime_error("Mutex lock failed");
-
+*/
 							fprintf(log_all,"%d Put pointer to (*it) #%" PRIu16 " to vector fr_number %d \n",
 									SB_total.at(i).second, (*it)->seq, (*it)->frame_number);
 
