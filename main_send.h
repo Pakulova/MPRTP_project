@@ -130,7 +130,7 @@ struct status
 	pthread_mutex_t rtcpsr_mutex_list;
 	pthread_mutex_t rtcprr_thread_mutex;
 	pthread_mutex_t rtp_thread_mutex;
-	uint16_t seq_num;
+	int16_t seq_num;
 	uint32_t sender_pc; /*packet count*/
 	uint32_t sender_oc; /*octet count*/
 	uint32_t lastsender_oc;
@@ -186,13 +186,13 @@ struct rtcprrbuf
 
 struct mprtphead
 {
-	uint16_t prospec;	//2
-	uint16_t wordlen;	//2
-	uint8_t hextid;		//1
-	uint8_t len;		//1
-	uint16_t mprtype;	//2
-	uint16_t subflowid; //2
-	uint16_t subflowseq;//2  = 12
+	uint16_t prospec;		//2
+	uint16_t wordlen;		//2
+	uint8_t hextid;			//1
+	uint8_t len;			//1
+	uint16_t mprtype;		//2
+	uint16_t subflowid; 	//2
+	uint16_t subflowseq;	//2  = 12
 };
 
 struct rtcpsrbuf
