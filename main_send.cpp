@@ -41,7 +41,7 @@ using std::vector;
 #include "main_send.h"
 
 #define VIDEO_RATE 90000
-#define Sliding_window 5000000
+#define Sliding_window 10000000
 #define alpha 0.5
 #define MTU 1460				//define MTU size of a network
 #define FPS 3					//reflects the quantity of Frame Per Sec layers of a video
@@ -196,12 +196,12 @@ int main(int argc, char* argv[])
 
 	log_while = fopen("/home/ekaterina/experiment/log_while", "w");
 
-	log_quantity = fopen("/home/ekaterina/experiment/log_qu", "w");
+	log_quantity = fopen("/home/ekaterina/experiment/octave/log_qu", "w");
 	if (log_quantity == NULL)
 		fprintf(log_all, "Impossible to open or create txt quantity!!!\n");
-	else
-		fprintf(log_quantity, "%s %8s %10s %10s \n", "Frame", "packets",
-				"Real time", "timestamp");
+//	else
+//		fprintf(log_quantity, "%s %8s %10s %10s \n", "Frame", "packets",
+//				"Real time", "timestamp");
 
 	log_rtcp_r = fopen("/home/ekaterina/experiment/log_rtcp_r", "w");
 	if (log_rtcp_r == NULL)
@@ -2024,7 +2024,7 @@ vector<std::pair<double, int> > SB_calculation()
 			fprintf(log_all, "1 AvB for path %d = %f \n", i, AvB.at(i).first);
 			fprintf(log_all, "%d Bnd from report = %" PRId64 " \n", i, rtcp_rr_packets.at(i).back()->Bnd);
 
-			if (common_loss.at(i).size() > 10)
+			if (common_loss.at(i).size() > 5)
 			{
 	//			printf("common_loss.at(%d).size = %zu before \n", i, common_loss.at(i).size());
 				std::vector<double>::iterator itb = common_loss.at(i).begin();
@@ -2406,7 +2406,7 @@ int create_packet()
 						packet = new struct rtppacket;
 
 						packet->create_time = now();
-						packet->payloadlen = payload;
+						packet->payloadlen = payload - 4;
 						packet->packetlen = packet->payloadlen + MPRTP_HEADER + 12; // plus rtp header
 						packet->ts = (int32_t)((*it)->time * 1000000);
 						packet->seq_fr = i;
@@ -2418,16 +2418,19 @@ int create_packet()
 						seq_fr = packet->seq_fr;
 						seq++;
 
-						memset(packet->buf + 12, 0, 12);
 						*(uint16_t*) (packet->buf + 2) = htons(packet->seq);
 						*(int32_t*) (packet->buf + 4) = htonl(packet->ts);
+
+						memset(packet->buf + 12, 0, 12);
 
 /*						fprintf(log_all,
 								"1 Frame #%d packet_fr#%d packet#%" PRIu16 " payload %d \n",
 								(*it)->number, packet->seq_fr, packet->seq,
 								packet->payloadlen);
 */
-						memset(packet->buf + 24, 1, packet->payloadlen);
+						*(uint16_t*) (packet->buf + 24) = htons(packet->frame_number);
+
+						memset(packet->buf + 28, 1, packet->payloadlen);
 
 						insert_data_to_list(packet);
 					}
@@ -2438,9 +2441,8 @@ int create_packet()
 						packet = new struct rtppacket;
 
 						packet->create_time = now();
-						packet->payloadlen = MTU - MPRTP_HEADER - 12;
-						packet->packetlen = packet->payloadlen + MPRTP_HEADER
-								+ 12;
+						packet->payloadlen = MTU - MPRTP_HEADER - 12 - 4;
+						packet->packetlen = packet->payloadlen + MPRTP_HEADER + 12;
 						packet->ts = (int32_t)((*it)->time * 1000000);
 						packet->seq_fr = i;
 						packet->seq = seq;
@@ -2454,7 +2456,10 @@ int create_packet()
 						*(int32_t*) (packet->buf + 4) = htonl(packet->ts);
 
 						memset(packet->buf + 12, 0, 12);
-						memset(packet->buf + 24, 1, packet->payloadlen);
+
+						*(uint16_t*) (packet->buf + 24) = htons(packet->frame_number);
+
+						memset(packet->buf + 28, 1, packet->payloadlen);
 
 	/*					fprintf(log_all,
 								"2 Frame #%d packet_fr#%d packet#%" PRIu16 " payload %d \n",
@@ -2472,9 +2477,9 @@ int create_packet()
 						int64_t t_finish = now();
 
 						fprintf(log_quantity,
-								"%d    %8" PRIu16 " %10" PRId64 " %10f  %10d%d %10" PRId64 "\n",
+								"%d    %8" PRIu16 " %10" PRId64 " %10f  %10d%d %10s %20" PRId64 "\n",
 								(*it)->number, quantity, (int64_t)((*it)->time * 1000000), (*it)->PSNRY.at(Media_index.first).at(Media_index.second),
-								Media_index.first, Media_index.second, t_finish);
+								Media_index.first, Media_index.second, (*it)->type, t_finish);
 
 						break;
 					}
@@ -2612,14 +2617,16 @@ vector<path_t> path_SB_scheduling(std::vector<std::pair<double, int> > SB_total)
 
 				while ((*it)->ts == init_ts)
 				{
-			/*		uint k = 0;
-					printf("paths_losses = %f \n",paths_losses);
-					printf("last_path = %d \n",last_path);
+
+					uint i = 0;
+			//		printf("paths_losses = %f \n",paths_losses);
+			//		printf("last_path = %d \n",last_path);
+
 					if(paths_losses == 0)
 						if (last_path == 0)
-							k = 1;
-*/
-					for (uint i = 0; i < SB_total.size();i++ )
+							i = 1;
+
+					for ( ; i < SB_total.size();i++ )
 					{
 						tc = now();
 //						fprintf(log_all,"%d tc - tp = %" PRId64 "\n", SB_total.at(i).second, tc - tp.at(SB_total.at(i).second));
@@ -2658,7 +2665,7 @@ vector<path_t> path_SB_scheduling(std::vector<std::pair<double, int> > SB_total)
 			//				printf("%d Put pointer to (*it) #%" PRIu16 " to vector fr_number %d \n",
 			//						SB_total.at(i).second, (*it)->seq, (*it)->frame_number);
 
-		//					last_path = i;
+							last_path = i;
 
 							(*it)->alloc_time = now();
 							path_status.at(SB_total.at(i).second)->packet.push_back(*it);

@@ -93,13 +93,12 @@ public:
 struct trace
 {
 public:
-	trace(): time (0), number (0),  location(NONALLOC), rate(0), size(LAYERS, std::vector<int> (FPS)),PSNRY(LAYERS, std::vector<double> (FPS)),
+	trace(): time (0), number (0),  location(NONALLOC), size(LAYERS, std::vector<int> (FPS)),PSNRY(LAYERS, std::vector<double> (FPS)),
 	PSNRU(LAYERS, std::vector<double> (FPS)), PSNRV(LAYERS, std::vector<double> (FPS)){}
 	double time;
 	int number;
 	char type[10];
     alloc location;
-    int rate;
     std::vector <std::vector<int> > size;
     std::vector <std::vector<double> > PSNRY;
     std::vector <std::vector<double> > PSNRU;
