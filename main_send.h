@@ -174,8 +174,8 @@ struct rtcprrbuf
 
 	/* Additional information for path scheduling*/
 	int path;
-	int64_t rrtime;
-	int64_t rtt;
+	uint64_t rrtime;
+	uint64_t rtt;
 	double lossrate;
 	int64_t Bnd;
 
